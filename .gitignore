@@ -1,0 +1,18 @@
+node_modules/
+build/
+dist/
+.vite/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+data/
+.superpowers/
+
+# temporary files
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo

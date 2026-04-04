@@ -1,0 +1,5 @@
+{
+  "name": "Local Knowledge Base Agent",
+  "description": "A local AI knowledge base assistant for processing large documents and performing RAG-based Q&A using Ollama.",
+  "requestFramePermissions": []
+}
