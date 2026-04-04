@@ -1,0 +1,288 @@
+import {useEffect, useRef, useState} from 'react';
+import {format} from 'date-fns';
+import {CheckCircle2, CircleX, Eye, File, FileSpreadsheet, Folder, Loader2, Trash2, UploadCloud} from 'lucide-react';
+import {cn} from '../../../shared/lib/utils';
+import type {Chunk, Document} from '../../../shared/types';
+
+export type DocumentListLocale = {
+  uploadDoc: string;
+  uploadFeatureHint: string;
+  uploadHint: string;
+  uploadSupport: string;
+  colName: string;
+  colSize: string;
+  colType: string;
+  colUploadTime: string;
+  colStatus: string;
+  colActions: string;
+  statusProcessing: string;
+  statusCompleted: string;
+  statusFailed: string;
+  previewAction: string;
+  detailAction: string;
+  deleteAction: string;
+  retryAction: string;
+  noDocuments: string;
+  previewTitle: string;
+  previewMetaSize: string;
+  previewMetaType: string;
+  previewMetaChunks: string;
+  previewNoChunks: string;
+  previewMoreChunks: string;
+  openDetails: string;
+  close: string;
+  uploadExists: string;
+  deleteDocConfirm: string;
+};
+
+type DocumentListPanelProps = {
+  isDarkTheme: boolean;
+  language: 'zh' | 'en';
+  locale: DocumentListLocale;
+  apiUrl: (endpoint: string) => string;
+  onOpenDetail: (doc: Document) => void;
+};
+
+export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpenDetail}: DocumentListPanelProps) {
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState<Document | null>(null);
+  const [previewChunks, setPreviewChunks] = useState<Chunk[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragRef = useRef<HTMLDivElement>(null);
+
+  const fetchDocs = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/documents'));
+      const data = await res.json();
+      setDocuments(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    fetchDocs();
+    const interval = setInterval(fetchDocs, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleUpload = async (file: File) => {
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch(apiUrl('/api/upload'), {method: 'POST', body: formData});
+      const data = await res.json();
+      if (data.status === 'exists') alert(locale.uploadExists);
+      fetchDocs();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const deleteDoc = async (id: string) => {
+    if (!confirm(locale.deleteDocConfirm)) return;
+    await fetch(apiUrl(`/api/documents/${id}`), {method: 'DELETE'});
+    fetchDocs();
+  };
+
+  const retryDoc = async (id: string) => {
+    try {
+      await fetch(apiUrl(`/api/documents/${id}/retry`), {method: 'POST'});
+      setDocuments((prev) => prev.map((doc) => (doc.id === id ? {...doc, jobStatus: 'running'} : doc)));
+      fetchDocs();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handlePreview = async (doc: Document) => {
+    try {
+      const res = await fetch(apiUrl(`/api/documents/${doc.id}`));
+      const data = await res.json();
+      setPreviewDoc(doc);
+      setPreviewChunks(data.chunks || []);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  return (
+    <div className={`flex-1 flex flex-col p-6 overflow-hidden ${isDarkTheme ? 'bg-slate-950' : 'bg-gray-50'}`}>
+      <div className={`max-w-6xl w-full mx-auto flex-1 flex flex-col rounded-xl shadow-sm border overflow-hidden ${isDarkTheme ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'}`}>
+        <div className={`p-6 border-b flex flex-col gap-4 shrink-0 ${isDarkTheme ? 'border-slate-800' : 'border-gray-100'}`}>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2"
+          >
+            {isUploading ? <Loader2 size={20} className="animate-spin" /> : <UploadCloud size={20} />}
+            {locale.uploadDoc} ({locale.uploadFeatureHint})
+          </button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            data-testid="documents-upload-input"
+            className="hidden"
+            onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])}
+          />
+          <div
+            data-testid="document-dropzone"
+            ref={dragRef}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const file = e.dataTransfer.files[0];
+              if (file) handleUpload(file);
+            }}
+            onClick={() => fileInputRef.current?.click()}
+            className={cn(
+              'w-full h-32 border-2 border-dashed rounded-lg flex flex-col items-center justify-center transition-colors cursor-pointer',
+              isDarkTheme
+                ? 'border-slate-600 text-slate-300 bg-slate-900/60 hover:bg-slate-800/80 hover:border-sky-400'
+                : 'border-gray-300 text-gray-400 bg-gray-50 hover:bg-blue-50 hover:border-blue-400',
+            )}
+          >
+            <Folder size={32} className={cn('mb-2', isDarkTheme ? 'text-slate-300' : 'text-gray-400')} />
+            <span className={cn('text-sm font-medium', isDarkTheme ? 'text-slate-100' : 'text-gray-600')}>{locale.uploadHint}</span>
+            <span className={cn('text-xs mt-1', isDarkTheme ? 'text-slate-400' : 'text-gray-500')}>{locale.uploadSupport}</span>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto">
+          <table className="w-full text-left border-collapse">
+            <thead className={cn('sticky top-0 border-b z-10', isDarkTheme ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200')}>
+              <tr>
+                <th className={cn('py-3 px-6 text-xs font-semibold uppercase tracking-wider', isDarkTheme ? 'text-slate-300' : 'text-gray-600')}>{locale.colName}</th>
+                <th className={cn('py-3 px-6 text-xs font-semibold uppercase tracking-wider text-center', isDarkTheme ? 'text-slate-300' : 'text-gray-600')}>{locale.colSize}</th>
+                <th className={cn('py-3 px-6 text-xs font-semibold uppercase tracking-wider text-center', isDarkTheme ? 'text-slate-300' : 'text-gray-600')}>{locale.colType}</th>
+                <th className={cn('py-3 px-6 text-xs font-semibold uppercase tracking-wider text-center', isDarkTheme ? 'text-slate-300' : 'text-gray-600')}>{locale.colUploadTime}</th>
+                <th className={cn('py-3 px-6 text-xs font-semibold uppercase tracking-wider text-center', isDarkTheme ? 'text-slate-300' : 'text-gray-600')}>{locale.colStatus}</th>
+                <th className={cn('py-3 px-6 text-xs font-semibold uppercase tracking-wider text-center', isDarkTheme ? 'text-slate-300' : 'text-gray-600')}>{locale.colActions}</th>
+              </tr>
+            </thead>
+            <tbody className={cn('divide-y', isDarkTheme ? 'divide-slate-800' : 'divide-gray-100')}>
+              {documents.map((doc) => {
+                const displayStatus = doc.jobStatus === 'running'
+                  ? 'processing'
+                  : doc.status === 'cancelled'
+                    ? 'failed'
+                  : doc.status;
+
+                return (
+                <tr key={doc.id} className={cn('transition-colors', isDarkTheme ? 'hover:bg-slate-800/60 even:bg-slate-900/40' : 'hover:bg-gray-50/50 even:bg-gray-50/30')}>
+                  <td className="py-4 px-6">
+                    <div className="flex items-center gap-3">
+                      {doc.type === '.xlsx' || doc.type === '.csv' ? <FileSpreadsheet size={18} className={isDarkTheme ? 'text-emerald-300' : 'text-green-600'} /> : doc.type === '.pdf' ? <File size={18} className="text-red-500" /> : <File size={18} className={isDarkTheme ? 'text-sky-300' : 'text-blue-500'} />}
+                      <span className={cn('font-medium truncate max-w-[200px]', isDarkTheme ? 'text-slate-100' : 'text-gray-800')} title={doc.name}>{doc.name}</span>
+                    </div>
+                  </td>
+                  <td className={cn('py-4 px-6 text-sm text-center', isDarkTheme ? 'text-slate-300' : 'text-gray-500')}>{(doc.size / 1024 / 1024).toFixed(2)} MB</td>
+                  <td className={cn('py-4 px-6 text-sm text-center', isDarkTheme ? 'text-slate-300' : 'text-gray-500')}>{doc.type}</td>
+                  <td className={cn('py-4 px-6 text-sm text-center', isDarkTheme ? 'text-slate-300' : 'text-gray-500')}>{doc.uploadTime ? format(new Date(doc.uploadTime), 'yyyy-MM-dd HH:mm') : '-'}</td>
+                  <td className="py-4 px-6 text-center">
+                    {displayStatus === 'processing' ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
+                        <Loader2 size={12} className="animate-spin" /> {locale.statusProcessing}
+                      </span>
+                    ) : displayStatus === 'completed' ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-100">
+                        <CheckCircle2 size={12} /> {locale.statusCompleted}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-100">
+                        <CircleX size={12} />
+                        {locale.statusFailed}
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-4 px-6 text-left">
+                    <div className="flex items-center justify-start gap-2">
+                      <button type="button" onClick={() => handlePreview(doc)} className={cn('p-1.5 rounded transition-colors', isDarkTheme ? 'text-slate-400 hover:text-sky-300 hover:bg-slate-800' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50')} title={locale.previewAction} aria-label={locale.previewAction}>
+                        <Eye size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onOpenDetail(doc)}
+                        className="px-3 py-1 text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 rounded transition-colors"
+                      >
+                        {locale.detailAction}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteDoc(doc.id)}
+                        className={cn('p-1.5 rounded transition-colors', isDarkTheme ? 'text-slate-400 hover:text-red-300 hover:bg-red-900/30' : 'text-gray-400 hover:text-red-600 hover:bg-red-50')}
+                        title={locale.deleteAction}
+                        aria-label={locale.deleteAction}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => retryDoc(doc.id)}
+                        disabled={displayStatus !== 'failed'}
+                        className={cn(
+                          'px-3 py-1 text-xs font-medium rounded transition-colors',
+                          displayStatus === 'failed'
+                            ? 'text-amber-700 border border-amber-200 hover:bg-amber-50'
+                            : 'text-gray-400 border border-gray-200 bg-gray-50 cursor-not-allowed',
+                        )}
+                      >
+                        {locale.retryAction}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                );
+              })}
+              {documents.length === 0 && (
+                <tr>
+                  <td colSpan={6} className={cn('py-10 text-center', isDarkTheme ? 'text-slate-400' : 'text-gray-400')}>{locale.noDocuments}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {previewDoc && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPreviewDoc(null)}>
+          <div data-testid="preview-modal-surface" className={cn('rounded-xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col', isDarkTheme ? 'bg-slate-900 border border-slate-700' : 'bg-white')} onClick={(e) => e.stopPropagation()}>
+            <div className={cn('p-4 border-b flex items-center justify-between shrink-0', isDarkTheme ? 'border-slate-700' : 'border-gray-200')}>
+              <h3 className={cn('font-bold', isDarkTheme ? 'text-slate-100' : 'text-gray-800')}>{locale.previewTitle} - {previewDoc.name}</h3>
+              <button type="button" onClick={() => setPreviewDoc(null)} className={cn('p-1 rounded', isDarkTheme ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-gray-100 text-gray-500')} aria-label={locale.close}>✕</button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              <div className={cn('mb-4 text-sm flex gap-4', isDarkTheme ? 'text-slate-300' : 'text-gray-500')}>
+                <span>{locale.previewMetaSize}: {(previewDoc.size / 1024 / 1024).toFixed(2)} MB</span>
+                <span>{locale.previewMetaType}: {previewDoc.type}</span>
+                <span>{locale.previewMetaChunks}: {previewChunks.length}</span>
+              </div>
+              <div className="space-y-3">
+                {previewChunks.length > 0 ? previewChunks.slice(0, 5).map((chunk, i) => (
+                  <div key={i} className={cn('border rounded-lg p-3', isDarkTheme ? 'border-slate-700 bg-slate-800/70' : 'border-gray-200 bg-gray-50/50')}>
+                    <span className={cn('text-xs font-bold px-2 py-0.5 rounded', isDarkTheme ? 'text-sky-200 bg-sky-900/50' : 'text-blue-600 bg-blue-100')}>#{(chunk.index || 0) + 1}</span>
+                    <p className={cn('text-sm mt-2 line-clamp-3 leading-relaxed', isDarkTheme ? 'text-slate-100' : 'text-gray-600')}>{chunk.content}</p>
+                  </div>
+                )) : (
+                  <p className={cn('text-center py-6', isDarkTheme ? 'text-slate-400' : 'text-gray-400')}>{locale.previewNoChunks}</p>
+                )}
+                {previewChunks.length > 5 && (
+                  <p className={cn('text-center text-sm', isDarkTheme ? 'text-slate-400' : 'text-gray-400')}>{language === 'en' ? `${previewChunks.length - 5} ${locale.previewMoreChunks}` : `还有 ${previewChunks.length - 5} ${locale.previewMoreChunks}`}</p>
+                )}
+              </div>
+            </div>
+            <div className={cn('p-4 border-t flex justify-end gap-2 shrink-0', isDarkTheme ? 'border-slate-700' : 'border-gray-200')}>
+              <button type="button" onClick={() => { setPreviewDoc(null); onOpenDetail(previewDoc); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">{locale.openDetails}</button>
+              <button type="button" onClick={() => setPreviewDoc(null)} className={cn('px-4 py-2 rounded-lg text-sm font-medium transition-colors', isDarkTheme ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-gray-100 hover:bg-gray-200')}>{locale.close}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
