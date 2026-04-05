@@ -6,153 +6,91 @@ import { splitSentencesForTest } from './document-chunker.test-helper.ts';
 import { protectEnglishBoundaries, restoreProtectedTokens } from './document-sentence-splitter.ts';
 import type { CleanedDocument } from './document-cleaner.ts';
 
-function buildChunkedCleanedDocument(overrides: Partial<CleanedDocument> = {}): CleanedDocument {
+function baseCleaned(overrides: Partial<CleanedDocument> = {}): CleanedDocument {
   return {
     fileType: 'pdf',
     fileName: 'sample.pdf',
     text: '默认文本。',
-    cleaningApplied: ['collapse_blank_lines'],
+    cleaningApplied: [],
     structure: [],
+    units: [],
     ...overrides,
   };
 }
 
 describe('document-chunker', () => {
-  it('keeps short txt as one chunk when <= 400 tokens', () => {
-    const cleaned: CleanedDocument = {
-      fileType: 'txt',
-      fileName: 'short.txt',
-      text: '短文本保留',
-      cleaningApplied: [],
-      structure: [],
-    };
-
-    const chunks = chunkDocument(cleaned);
+  it('keeps small txt as one chunk', () => {
+    const chunks = chunkDocument(baseCleaned({ fileType: 'txt', fileName: 'short.txt', text: '短文本保留', units: [{ sourceUnit: 'body', sourceLabel: null, text: '短文本保留' }] }));
 
     expect(chunks).toHaveLength(1);
-    expect(chunks[0]?.sourceUnit).toBe('body');
+    expect(chunks[0]?.qualityNote).toBe('small_text_single_chunk');
   });
 
-  it('splits pdf by heading and sentence boundaries', () => {
-    const cleaned: CleanedDocument = {
-      fileType: 'pdf',
-      fileName: 'book.pdf',
-      text: '第一章。第一段。第二段。第二章。第三段。',
-      cleaningApplied: ['remove_header'],
-      structure: [{ label: '第一章', level: 1 }, { label: '第二章', level: 1 }],
-    };
+  it('splits long txt semantically with overlap metadata', () => {
+    const longText = Array.from({ length: 260 }, () => '这是一个较长句子用于语义分块。').join('');
+    const chunks = chunkDocument(baseCleaned({ fileType: 'txt', text: longText, units: [{ sourceUnit: 'body', sourceLabel: null, text: longText }] }));
 
-    const chunks = chunkDocument(cleaned);
-
-    expect(chunks[0]?.sourceUnit).toBe('heading');
     expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.some((chunk) => chunk.overlapTokenCount > 0)).toBe(true);
   });
 
-  it('marks filtered empty chunks with qualityStatus filtered', () => {
-    const filtered = qualityCheckChunks([
-      { sourceUnit: 'body', sourceLabel: null, content: '   ', tokenCount: 0, qualityStatus: 'passed' },
+  it('splits pdf/docx by heading and sentence boundaries', () => {
+    const chapterOne = Array.from({ length: 120 }, () => '这是第一章里比较长的一句，用于触发语义分块。').join('');
+    const chapterTwo = Array.from({ length: 120 }, () => '这是第二章里比较长的一句，用于触发语义分块。').join('');
+    const text = `第一章\n\n${chapterOne}\n\n第二章\n\n${chapterTwo}`;
+    const chunks = chunkDocument(baseCleaned({
+      fileType: 'pdf',
+      text,
+      structure: [{ label: '第一章', level: 1 }, { label: '第二章', level: 1 }],
+      units: [{ sourceUnit: 'body', sourceLabel: null, text }],
+    }));
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.some((chunk) => chunk.sourceLabel?.includes('第一章'))).toBe(true);
+  });
+
+  it('chunks sheet data by headers and row groups', () => {
+    const sheetRows = Array.from({ length: 420 }, (_, i) => `张三${i} | ${(i % 100) + 1} | 数学 | 期末考试`).join('\n');
+    const chunks = chunkDocument(baseCleaned({
+      fileType: 'xlsx',
+      text: sheetRows,
+      units: [{ sourceUnit: 'sheet', sourceLabel: '成绩表', text: sheetRows, headers: ['姓名', '分数'] }],
+    }));
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.sourceUnit === 'sheet')).toBe(true);
+    expect(chunks.some((chunk) => chunk.content.includes('Header: 姓名 | 分数'))).toBe(true);
+  });
+
+  it('keeps small json as single chunk and splits large json by top-level nodes', () => {
+    const small = chunkDocument(baseCleaned({
+      fileType: 'json',
+      text: '{"a":1}',
+      units: [{ sourceUnit: 'json_node', sourceLabel: 'a', nodePath: 'a', text: '1' }],
+    }));
+    expect(small).toHaveLength(1);
+
+    const largeUnits = Array.from({ length: 30 }, (_, i) => ({
+      sourceUnit: 'json_node' as const,
+      sourceLabel: `node_${i}`,
+      nodePath: `node_${i}`,
+      text: JSON.stringify({ value: 'x'.repeat(120) }),
+    }));
+    const large = chunkDocument(baseCleaned({ fileType: 'json', text: JSON.stringify(Object.fromEntries(largeUnits.map((u) => [u.sourceLabel!, JSON.parse(u.text)]))), units: largeUnits }));
+
+    expect(large.length).toBeGreaterThan(1);
+    expect(large.every((chunk) => chunk.overlapTokenCount === 0)).toBe(true);
+  });
+
+  it('quality check merges tiny fragments and filters empty chunks', () => {
+    const checked = qualityCheckChunks([
+      { sourceUnit: 'body', sourceLabel: null, content: '主体内容'.repeat(80), tokenCount: 200, overlapTokenCount: 0, qualityStatus: 'passed' },
+      { sourceUnit: 'body', sourceLabel: null, content: '短片段', tokenCount: 5, overlapTokenCount: 0, qualityStatus: 'passed' },
+      { sourceUnit: 'body', sourceLabel: null, content: '   ', tokenCount: 0, overlapTokenCount: 0, qualityStatus: 'filtered' },
     ]);
 
-    expect(filtered[0]?.qualityStatus).toBe('filtered');
-  });
-
-  it('caps oversized pdf chunk explosion by merging adjacent short segments', () => {
-    const cleaned: CleanedDocument = {
-      fileType: 'pdf',
-      fileName: 'huge.pdf',
-      text: Array.from({ length: 300 }, (_, index) => `段落${index + 1}`).join('。') + '。',
-      cleaningApplied: [],
-      structure: [{ label: '第一章', level: 1 }],
-    };
-
-    const chunks = chunkDocument(cleaned);
-
-    expect(chunks.length).toBeLessThan(80);
-  });
-
-  it('splits english pdf content by english sentence and paragraph boundaries', () => {
-    const cleaned = buildChunkedCleanedDocument({
-      fileType: 'pdf',
-      fileName: 'english.pdf',
-      text: 'Chapter 1\n\nThis is the first sentence. This is the second sentence.\n\nChapter 2\n\nAnother paragraph starts here. It continues.',
-    });
-
-    const chunks = chunkDocument(cleaned);
-
-    expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.some((chunk) => chunk.content.includes('Another paragraph'))).toBe(true);
-  });
-
-  it('splits mixed-language pdf content without collapsing english and chinese sections into one block', () => {
-    const cleaned = buildChunkedCleanedDocument({
-      fileType: 'pdf',
-      fileName: 'mixed.pdf',
-      text: '第一章\n\n中文第一句。English sentence one. English sentence two.\n\n第二章\n\n这是第二段。Another paragraph follows.',
-      structure: [{ label: '第一章', level: 1 }, { label: '第二章', level: 1 }],
-    });
-
-    const chunks = chunkDocument(cleaned);
-
-    expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.some((chunk) => chunk.content.includes('English sentence one'))).toBe(true);
-    expect(chunks.some((chunk) => chunk.content.includes('这是第二段'))).toBe(true);
-  });
-
-  it('splits bilingual docx content by bilingual sentence boundaries', () => {
-    const cleaned = buildChunkedCleanedDocument({
-      fileType: 'docx',
-      fileName: 'bilingual.docx',
-      text: 'Overview\n\nThis document starts in English. It keeps going.\n\n第二节\n\n这里切换到中文。Still contains English afterwards.',
-      structure: [{ label: 'Overview', level: 1 }, { label: '第二节', level: 1 }],
-    });
-
-    const chunks = chunkDocument(cleaned);
-
-    expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.some((chunk) => chunk.content.includes('这里切换到中文'))).toBe(true);
-  });
-
-  it('does not merge short segments when document does not hit merge thresholds', () => {
-    const cleaned = buildChunkedCleanedDocument({
-      fileType: 'pdf',
-      fileName: 'small-english.pdf',
-      text: 'Intro\n\nOne short line.\n\nTwo short line.\n\nThree short line.',
-      structure: [{ label: 'Intro', level: 1 }],
-    });
-
-    const chunks = chunkDocument(cleaned);
-
-    expect(chunks.length).toBeGreaterThanOrEqual(3);
-    expect(chunks.some((chunk) => chunk.qualityStatus === 'merged')).toBe(false);
-  });
-
-  it('marks merged chunks when chunk explosion threshold is reached', () => {
-    const cleaned = buildChunkedCleanedDocument({
-      fileType: 'pdf',
-      fileName: 'tiny-lines.pdf',
-      text: Array.from({ length: 240 }, (_, index) => `Line ${index + 1}.`).join(' '),
-      structure: [{ label: 'Overview', level: 1 }],
-    });
-
-    const chunks = chunkDocument(cleaned);
-
-    expect(chunks.length).toBeLessThan(120);
-    expect(chunks.some((chunk) => chunk.qualityStatus === 'merged')).toBe(true);
-  });
-
-  it('marks oversized english segments as split with heading metadata preserved', () => {
-    const cleaned = buildChunkedCleanedDocument({
-      fileType: 'pdf',
-      fileName: 'oversized.pdf',
-      text: `Chapter 9\n\n${Array.from({ length: 120 }, () => 'This is a long english sentence that should be split safely.').join(' ')}`,
-      structure: [{ label: 'Chapter 9', level: 1 }],
-    });
-
-    const chunks = chunkDocument(cleaned);
-
-    expect(chunks.some((chunk) => chunk.qualityStatus === 'split')).toBe(true);
-    expect(chunks.some((chunk) => chunk.sourceLabel === 'Chapter 9')).toBe(true);
-    expect(chunks.every((chunk) => chunk.tokenCount > 0)).toBe(true);
+    expect(checked.length).toBe(1);
+    expect(checked[0]?.qualityStatus).toBe('merged');
   });
 });
 

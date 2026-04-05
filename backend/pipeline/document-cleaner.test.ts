@@ -38,5 +38,23 @@ describe('document-cleaner', () => {
     expect(cleaned.text).not.toContain('æµè¯');
     expect(cleaned.text).not.toContain('\n\n\n');
     expect(cleaned.structure[0]?.level).toBe(1);
+    expect(cleaned.units.every((unit) => unit.text.trim().length > 0)).toBe(true);
+  });
+
+  it('removes reference tail so only body remains for chunking', () => {
+    const parsed: ParsedDocument = {
+      fileType: 'pdf',
+      fileName: 'paper.pdf',
+      text: '结论段落\n\n参考文献\n[1] xxx',
+      units: [
+        { sourceUnit: 'body', sourceLabel: null, text: '结论段落\n\n参考文献\n[1] xxx' },
+      ],
+    };
+
+    const cleaned = cleanDocumentText(parsed);
+
+    expect(cleaned.text).toContain('结论段落');
+    expect(cleaned.text).not.toContain('参考文献');
+    expect(cleaned.cleaningApplied).toContain('remove_reference_tail');
   });
 });

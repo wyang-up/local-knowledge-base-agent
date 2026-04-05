@@ -4,6 +4,25 @@ import mammoth from 'mammoth';
 import { PDFParse } from 'pdf-parse';
 import { decodePlainTextBuffer, extractPdfText } from '../utils/server-utils.ts';
 
+type XlsxApi = {
+  readFile: (filePath: string) => xlsx.WorkBook;
+  utils: {
+    sheet_to_json: typeof xlsx.utils.sheet_to_json;
+  };
+};
+
+export function resolveXlsxApi(mod: any): XlsxApi {
+  const candidate = typeof mod?.readFile === 'function'
+    ? mod
+    : (typeof mod?.default?.readFile === 'function' ? mod.default : null);
+
+  if (!candidate || !candidate.utils || typeof candidate.utils.sheet_to_json !== 'function') {
+    throw new Error('xlsx api unavailable');
+  }
+
+  return candidate as XlsxApi;
+}
+
 export type ParsedDocumentUnit = {
   sourceUnit: 'body' | 'sheet' | 'json_node' | 'heading';
   sourceLabel: string | null;
@@ -46,6 +65,7 @@ function createBodyParsed(fileType: string, fileName: string, text: string): Par
 
 export async function parseDocument(input: ParseDocumentInput): Promise<ParsedDocument> {
   const fileType = normalizeFileType(input.fileType);
+  const xlsxApi = resolveXlsxApi(xlsx);
 
   if (fileType === 'txt') {
     const decoded = decodePlainTextBuffer(await fs.readFile(input.filePath));
@@ -70,9 +90,9 @@ export async function parseDocument(input: ParseDocumentInput): Promise<ParsedDo
   }
 
   if (fileType === 'xlsx' || fileType === 'xls') {
-    const workbook = xlsx.readFile(input.filePath);
+    const workbook = xlsxApi.readFile(input.filePath);
     const units = workbook.SheetNames.map((sheetName) => {
-      const rows = xlsx.utils.sheet_to_json<(string | number | null)[]>(workbook.Sheets[sheetName], { header: 1 });
+      const rows = xlsxApi.utils.sheet_to_json<(string | number | null)[]>(workbook.Sheets[sheetName], { header: 1 });
       const [headerRow = [], ...dataRows] = rows;
       return {
         sourceUnit: 'sheet' as const,
