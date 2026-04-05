@@ -243,8 +243,4 @@ export function qualityCheckChunks(chunks: ChunkDraft[]): ChunkDraft[] {
   });
 }
 
-export const __test__ = {
-  splitSentencesForTest: splitParagraphIntoSentences,
-};
-
 export type { ChunkDraft };

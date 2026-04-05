@@ -1,10 +1,9 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest';
-import { __test__, chunkDocument, qualityCheckChunks } from './document-chunker.ts';
+import { chunkDocument, qualityCheckChunks } from './document-chunker.ts';
+import { splitSentencesForTest } from './document-chunker.test-helper.ts';
 import type { CleanedDocument } from './document-cleaner.ts';
-
-const { splitSentencesForTest } = __test__;
 
 function buildChunkedCleanedDocument(overrides: Partial<CleanedDocument> = {}): CleanedDocument {
   return {
