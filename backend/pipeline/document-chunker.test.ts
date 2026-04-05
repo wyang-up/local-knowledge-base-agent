@@ -296,4 +296,71 @@ describe('english sentence boundary contracts (RED)', () => {
       'See No. 12 and Fig. 3 for proof.',
     ]);
   });
+
+  it('splits sentence-end U.S. when next sentence starts with quotes or parentheses', () => {
+    const quoted = 'He moved to the U.S. "Another line starts."';
+    const parenthesized = 'He moved to the U.S. (Another line starts.)';
+
+    expect(splitSentencesForTest(quoted)).toEqual([
+      'He moved to the U.S.',
+      '"Another line starts."',
+    ]);
+    expect(splitSentencesForTest(parenthesized)).toEqual([
+      'He moved to the U.S.',
+      '(Another line starts.)',
+    ]);
+  });
+
+  it('keeps Mr./Ms. titles attached without early split', () => {
+    const text = 'Mr. Brown arrived. Ms. Green followed.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'Mr. Brown arrived.',
+      'Ms. Green followed.',
+    ]);
+  });
+
+  it('handles Ph.D. in-sentence and sentence-end contexts', () => {
+    const middle = 'She earned a Ph.D. degree in 2010. Another sentence.';
+    const sentenceEnd = 'She earned a Ph.D. "Another sentence starts."';
+
+    expect(splitSentencesForTest(middle)).toEqual([
+      'She earned a Ph.D. degree in 2010.',
+      'Another sentence.',
+    ]);
+    expect(splitSentencesForTest(sentenceEnd)).toEqual([
+      'She earned a Ph.D.',
+      '"Another sentence starts."',
+    ]);
+  });
+
+  it('matches legacy behavior when english boundary protection flag is disabled', () => {
+    const previous = process.env.ENABLE_ENGLISH_BOUNDARY_PROTECTION;
+    process.env.ENABLE_ENGLISH_BOUNDARY_PROTECTION = '0';
+    try {
+      const text = 'Dr. Smith arrived. He lived in the U.S. market for years.';
+      expect(splitSentencesForTest(text)).toEqual([
+        'Dr.',
+        'Smith arrived.',
+        'He lived in the U.',
+        'S.',
+        'market for years.',
+      ]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ENABLE_ENGLISH_BOUNDARY_PROTECTION;
+      } else {
+        process.env.ENABLE_ENGLISH_BOUNDARY_PROTECTION = previous;
+      }
+    }
+  });
+
+  it('keeps placeholder-like literals unchanged in output', () => {
+    const text = 'Literal __EB_DOT__ stays here. Literal __EB_END__ stays too.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'Literal __EB_DOT__ stays here.',
+      'Literal __EB_END__ stays too.',
+    ]);
+  });
 });

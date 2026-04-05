@@ -1,6 +1,4 @@
-const SENTENCE_SPLIT_REGEX = /[^。！？；.!?;]+[。！？；.!?;]?/g;
-const PROTECTED_DOT_TOKEN = '__EB_DOT__';
-const SENTENCE_END_SENTINEL = '__EB_END__';
+const SENTENCE_SPLIT_REGEX = /[^。！？；.!?;]+[。！？；.!?;]?["'”’）)\]}]*/g;
 
 type CandidateKind = 'numbering' | 'version' | 'abbr_multi' | 'abbr_single';
 
@@ -48,13 +46,17 @@ function normalizeWhitespace(text: string) {
   return text.replace(/\r/g, '').replace(/[ \t]+/g, ' ').trim();
 }
 
+function isQuoteOrBracket(char: string) {
+  return /["'“”‘’(){}\[\]（）]/.test(char);
+}
+
 function isUpperCaseLatin(char: string) {
   return /^[A-Z]$/.test(char);
 }
 
 function isSentenceEndContext(text: string, dotIndex: number) {
   let index = dotIndex + 1;
-  while (index < text.length && /\s/.test(text[index] ?? '')) {
+  while (index < text.length && (/\s/.test(text[index] ?? '') || isQuoteOrBracket(text[index] ?? ''))) {
     index += 1;
   }
 
@@ -64,6 +66,29 @@ function isSentenceEndContext(text: string, dotIndex: number) {
   }
 
   return isUpperCaseLatin(nextChar);
+}
+
+type ProtectionTokens = {
+  protectedDotToken: string;
+  sentenceEndToken: string;
+};
+
+type ProtectedTextResult = {
+  text: string;
+  tokens: ProtectionTokens;
+};
+
+function buildProtectionTokens(source: string): ProtectionTokens {
+  let nonce = 0;
+  while (true) {
+    const suffix = `${Date.now().toString(36)}_${nonce.toString(36)}`;
+    const protectedDotToken = `__EBPD_${suffix}__`;
+    const sentenceEndToken = `__EBSE_${suffix}__`;
+    if (!source.includes(protectedDotToken) && !source.includes(sentenceEndToken)) {
+      return { protectedDotToken, sentenceEndToken };
+    }
+    nonce += 1;
+  }
 }
 
 function collectDotIndexes(fullText: string, start: number, end: number) {
@@ -176,10 +201,11 @@ function shouldAppendSentenceEndSentinel(candidate: Candidate, dotIndex: number,
   return isFinalDot && isSentenceEndContext(fullText, dotIndex);
 }
 
-export function protectEnglishBoundaries(text: string) {
+export function protectEnglishBoundaries(text: string): ProtectedTextResult {
   const candidates = collectCandidates(text);
+  const tokens = buildProtectionTokens(text);
   if (candidates.length === 0) {
-    return text;
+    return { text, tokens };
   }
 
   const protectedDots = new Set<number>();
@@ -209,23 +235,23 @@ export function protectEnglishBoundaries(text: string) {
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index] ?? '';
     if (char === '.' && protectedDots.has(index)) {
-      output += PROTECTED_DOT_TOKEN;
+      output += tokens.protectedDotToken;
     } else {
       output += char;
     }
 
     if (sentenceEndSentinels.has(index)) {
-      output += SENTENCE_END_SENTINEL;
+      output += tokens.sentenceEndToken;
     }
   }
 
-  return output;
+  return { text: output, tokens };
 }
 
-export function restoreProtectedTokens(text: string) {
+export function restoreProtectedTokens(text: string, tokens: ProtectionTokens) {
   return text
-    .replaceAll(PROTECTED_DOT_TOKEN, '.')
-    .replaceAll(SENTENCE_END_SENTINEL, '');
+    .replaceAll(tokens.protectedDotToken, '.')
+    .replaceAll(tokens.sentenceEndToken, '');
 }
 
 function splitByLegacyBoundary(text: string) {
@@ -247,8 +273,10 @@ export function splitSentencesByBoundary(text: string): string[] {
   const normalized = normalizeWhitespace(text);
   if (!normalized) return [];
 
-  const protectedText = protectEnglishBoundaries(normalized);
-  const matches = protectedText.match(SENTENCE_SPLIT_REGEX);
-  const segments = (matches ?? [protectedText]).map((segment) => restoreProtectedTokens(segment).trim()).filter(Boolean);
+  const protectedResult = protectEnglishBoundaries(normalized);
+  const matches = protectedResult.text.match(SENTENCE_SPLIT_REGEX);
+  const segments = (matches ?? [protectedResult.text])
+    .map((segment) => restoreProtectedTokens(segment, protectedResult.tokens).trim())
+    .filter(Boolean);
   return segments;
 }
