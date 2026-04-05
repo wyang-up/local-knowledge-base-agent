@@ -343,6 +343,13 @@ export async function createDocumentPipelineStore(db: Database) {
       await db.run('DELETE FROM document_job_checkpoints WHERE document_id = ?', documentId);
     },
 
+    async clearDocumentData(documentId: string) {
+      await db.run('DELETE FROM document_stage_logs WHERE document_id = ?', documentId);
+      await db.run('DELETE FROM document_jobs WHERE document_id = ?', documentId);
+      await db.run('DELETE FROM document_job_checkpoints WHERE document_id = ?', documentId);
+      await db.run('DELETE FROM document_chunk_metadata WHERE document_id = ?', documentId);
+    },
+
     async replaceChunkMetadata(documentId: string, records: ChunkMetadataRecord[]) {
       await db.run('DELETE FROM document_chunk_metadata WHERE document_id = ?', documentId);
       for (const record of records) {
