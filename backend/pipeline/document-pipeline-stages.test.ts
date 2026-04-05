@@ -102,5 +102,22 @@ describe('document-pipeline-stages', () => {
     expect(buildChunkMetadataRecords).toHaveBeenCalledTimes(1);
     expect(replaceChunkMetadata).toHaveBeenCalledWith('doc-1', [{ chunkId: 'doc-1-0' }]);
     expect(addVectorChunks).toHaveBeenCalledTimes(1);
+
+    const vectorPayload = addVectorChunks.mock.calls[0]?.[0] as Array<Record<string, unknown>>;
+    expect(vectorPayload?.[0]).toMatchObject({
+      id: 'doc-1-0',
+      docId: 'doc-1',
+      content: 'alpha',
+      chunkIndex: 0,
+    });
+    expect(vectorPayload?.[0]).not.toHaveProperty('sourceUnit');
+    expect(vectorPayload?.[0]).not.toHaveProperty('sourceLabel');
+    expect(Object.keys(vectorPayload?.[0] ?? {}).sort()).toEqual([
+      'chunkIndex',
+      'content',
+      'docId',
+      'embedding',
+      'id',
+    ]);
   });
 });

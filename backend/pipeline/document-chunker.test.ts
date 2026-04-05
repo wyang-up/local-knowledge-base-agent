@@ -92,6 +92,60 @@ describe('document-chunker', () => {
     expect(checked.length).toBe(1);
     expect(checked[0]?.qualityStatus).toBe('merged');
   });
+
+  it('adds bilingual tree metadata for pdf/docx chunks', () => {
+    const text = `Abstract\n\n${Array.from({ length: 120 }, () => 'This is overview sentence for metadata.').join(' ')}\n\n第1章 方法\n\n${Array.from({ length: 120 }, () => '这里是中文段落用于元数据测试。').join('')}`;
+    const chunks = chunkDocument(baseCleaned({
+      fileType: 'pdf',
+      fileName: 'meta.pdf',
+      text,
+      structure: [{ label: 'Abstract', level: 1 }, { label: '第1章 方法', level: 1 }],
+      units: [{ sourceUnit: 'body', sourceLabel: null, text }],
+    }));
+
+    expect(chunks.every((chunk) => chunk.lang === 'zh' || chunk.lang === 'en')).toBe(true);
+    expect(chunks.every((chunk) => Array.isArray(chunk.hierarchy))).toBe(true);
+    expect(chunks.every((chunk) => typeof chunk.title === 'string' && chunk.title.length > 0)).toBe(true);
+    expect(chunks.some((chunk) => chunk.nodeType === 'abstract' || chunk.nodeType === 'chapter' || chunk.nodeType === 'body')).toBe(true);
+  });
+
+  it('keeps appendix as a single level-1 chunk', () => {
+    const body = Array.from({ length: 120 }, () => 'Main chapter sentence for triggering semantic chunking.').join(' ');
+    const appendix = Array.from({ length: 80 }, () => 'Appendix detail sentence remains in one chunk.').join(' ');
+    const text = `Chapter 1\n\n${body}\n\nAppendix\n\n${appendix}`;
+    const chunks = chunkDocument(baseCleaned({
+      fileType: 'pdf',
+      fileName: 'appendix.pdf',
+      text,
+      units: [{ sourceUnit: 'body', sourceLabel: null, text }],
+    }));
+
+    const appendixChunks = chunks.filter((chunk) => chunk.sectionType === 'appendix');
+    expect(appendixChunks).toHaveLength(1);
+    expect(appendixChunks[0]?.sectionLevel).toBe(1);
+    expect(appendixChunks[0]?.qualityNote).toBe('appendix_single_chunk');
+  });
+
+  it('splits references by entries instead of sentence windows', () => {
+    const body = Array.from({ length: 120 }, () => 'Main chapter sentence for triggering semantic chunking.').join(' ');
+    const refs = [
+      '[1] Alpha paper. 2020.',
+      '[2] Beta paper. 2021.',
+      '[3] Gamma paper. 2022.',
+    ].join('\n');
+    const text = `Chapter 1\n\n${body}\n\nReferences\n\n${refs}`;
+    const chunks = chunkDocument(baseCleaned({
+      fileType: 'pdf',
+      fileName: 'refs.pdf',
+      text,
+      units: [{ sourceUnit: 'body', sourceLabel: null, text }],
+    }));
+
+    const referenceChunks = chunks.filter((chunk) => chunk.sectionType === 'references');
+    expect(referenceChunks).toHaveLength(3);
+    expect(referenceChunks.every((chunk) => chunk.sectionLevel === 1)).toBe(true);
+    expect(referenceChunks.every((chunk) => chunk.qualityNote === 'references_entry_chunk')).toBe(true);
+  });
 });
 
 describe('english sentence boundary contracts (RED)', () => {

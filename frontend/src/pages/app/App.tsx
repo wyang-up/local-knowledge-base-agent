@@ -1100,6 +1100,33 @@ export default function App() {
       }
     };
 
+    const handleRechunk = async () => {
+      try {
+        const res = await fetch(apiUrl(`/api/documents/${details.id}/rechunk`), { method: 'POST' });
+        if (!res.ok) throw new Error('rechunk failed');
+        const refreshed = await fetch(apiUrl(`/api/documents/${details.id}`)).then((r) => r.json());
+        setDetails(refreshed);
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    const handleExportChunks = async () => {
+      try {
+        const res = await fetch(apiUrl(`/api/documents/${details.id}/chunks/export`));
+        if (!res.ok) throw new Error('export failed');
+        const payload = await res.json();
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `${details.name.replace(/\.[^.]+$/, '')}-chunks.json`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
     return (
       <DocumentDetailPanel
         isDarkTheme={isDarkTheme}
@@ -1138,6 +1165,8 @@ export default function App() {
         onSaveDescription={saveDescription}
         onBack={goToList}
         onOpenSettings={() => handleTabChange('settings')}
+        onRechunk={handleRechunk}
+        onExportChunks={handleExportChunks}
       />
     );
   };

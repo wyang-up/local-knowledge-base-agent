@@ -43,6 +43,8 @@ type DocumentDetailPanelProps = {
   onSaveDescription: (description: string) => void;
   onBack: () => void;
   onOpenSettings: () => void;
+  onRechunk?: () => void;
+  onExportChunks?: () => void;
 };
 
 type OutlineNode = {
@@ -51,6 +53,8 @@ type OutlineNode = {
   level: number;
   chunkIds: string[];
   children: OutlineNode[];
+  nodeType?: Chunk['nodeType'];
+  lang?: Chunk['lang'];
 };
 
 type HeadingMatch = {title: string; level: number} | null;
@@ -96,9 +100,39 @@ function buildOutline(chunks: Chunk[], fallbackPrefix: string): {
     level: 1,
     chunkIds: [],
     children: [],
+    nodeType: 'body',
+    lang: 'zh',
   };
 
   chunks.forEach((chunk, index) => {
+    if (Array.isArray(chunk.hierarchy) && chunk.hierarchy.length > 0) {
+      let currentNodes = roots;
+      let path = '';
+      chunk.hierarchy.forEach((title, idx) => {
+        path = `${path}/${title}`;
+        const level = Math.max(1, Math.min((idx + 1), 6));
+        let node = currentNodes.find((item) => item.id === path);
+        if (!node) {
+          node = {
+            id: path,
+            title,
+            level,
+            chunkIds: [],
+            children: [],
+            nodeType: idx === chunk.hierarchy!.length - 1 ? chunk.nodeType : 'body',
+            lang: chunk.lang,
+          };
+          currentNodes.push(node);
+        }
+        if (idx === chunk.hierarchy!.length - 1) {
+          node.chunkIds.push(chunk.id);
+          sectionByChunkId[chunk.id] = {id: node.id, title: node.title};
+        }
+        currentNodes = node.children;
+      });
+      return;
+    }
+
     const heading = extractHeading(chunk.content);
     if (heading) {
       const node: OutlineNode = {
@@ -107,6 +141,8 @@ function buildOutline(chunks: Chunk[], fallbackPrefix: string): {
         level: Math.max(1, Math.min(heading.level, 6)),
         chunkIds: [chunk.id],
         children: [],
+        nodeType: chunk.nodeType,
+        lang: chunk.lang,
       };
 
       while (stack.length && stack[stack.length - 1].level >= node.level) {
@@ -148,6 +184,30 @@ function collectChunkIds(node: OutlineNode): string[] {
   return [...node.chunkIds, ...node.children.flatMap(collectChunkIds)];
 }
 
+function sectionIcon(nodeType?: Chunk['nodeType']) {
+  switch (nodeType) {
+    case 'abstract':
+      return '📌';
+    case 'preface':
+    case 'intro':
+      return '📖';
+    case 'appendix':
+      return '📎';
+    case 'ref':
+      return '📄';
+    default:
+      return '📚';
+  }
+}
+
+function shortenSectionTitle(title: string, maxLen = 18) {
+  const normalized = title.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '-';
+  const chars = Array.from(normalized);
+  if (chars.length <= maxLen) return normalized;
+  return `${chars.slice(0, maxLen).join('')}...`;
+}
+
 export function DocumentDetailPanel({
   isDarkTheme,
   locale,
@@ -157,8 +217,12 @@ export function DocumentDetailPanel({
   onSaveDescription,
   onBack,
   onOpenSettings,
+  onRechunk,
+  onExportChunks,
 }: DocumentDetailPanelProps) {
   const highlightedRef = useRef<HTMLDivElement | null>(null);
+  const chunkRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const manualSectionLockUntilRef = useRef(0);
   const [focusedChunkId, setFocusedChunkId] = useState<string | null>(highlightedChunkId);
   const [descriptionDraft, setDescriptionDraft] = useState(details.description || '');
   const [expandedChunks, setExpandedChunks] = useState<Record<string, boolean>>({});
@@ -203,6 +267,35 @@ export function DocumentDetailPanel({
     }
   }, [focusedChunkId, details.id]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.IntersectionObserver === 'undefined') return;
+    const nodes = Object.entries(chunkRefs.current)
+      .map(([, value]) => value)
+      .filter((item): item is HTMLDivElement => Boolean(item));
+    if (nodes.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (Date.now() < manualSectionLockUntilRef.current) return;
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => {
+            const aTop = Math.abs(a.boundingClientRect.top - 180);
+            const bTop = Math.abs(b.boundingClientRect.top - 180);
+            if (aTop !== bTop) return aTop - bTop;
+            return b.intersectionRatio - a.intersectionRatio;
+          })[0];
+        if (!visible) return;
+        const chunkId = (visible.target as HTMLElement).dataset.chunkId;
+        if (!chunkId) return;
+        const section = outline.sectionByChunkId[chunkId];
+        if (section?.id) setActiveSectionId(section.id);
+      },
+      { threshold: [0.35, 0.6] },
+    );
+    nodes.forEach((node) => observer.observe(node));
+    return () => observer.disconnect();
+  }, [details.id, outline.sectionByChunkId]);
+
   const handleDescriptionBlur = () => {
     const normalized = descriptionDraft.trim();
     if (normalized === (details.description || '').trim()) return;
@@ -212,8 +305,13 @@ export function DocumentDetailPanel({
   const jumpToSection = (node: OutlineNode) => {
     const ids = collectChunkIds(node);
     if (!ids.length) return;
+    manualSectionLockUntilRef.current = Date.now() + 1400;
     setActiveSectionId(node.id);
     setFocusedChunkId(ids[0]);
+    const target = chunkRefs.current[ids[0]];
+    if (target && typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   };
 
   const downloadChunks = () => {
@@ -257,12 +355,15 @@ export function DocumentDetailPanel({
             type="button"
             onClick={() => jumpToSection(node)}
             className={cn(
-              'flex-1 min-w-0 text-left py-2 pr-2 text-sm rounded-md transition-colors',
+              'flex-1 min-w-0 text-left py-2 pr-2 text-sm rounded-md transition-colors flex items-center gap-2 whitespace-nowrap',
               isDarkTheme ? 'text-slate-200 hover:bg-slate-800' : 'text-gray-700 hover:bg-blue-50',
             )}
           >
-            <span className="truncate inline-block max-w-[160px] align-middle">{node.title}</span>
-            <span className={cn('ml-2 text-xs align-middle', isDarkTheme ? 'text-slate-400' : 'text-gray-500')}>[{chunkTotal}块]</span>
+            <span className="inline-flex items-center gap-1 min-w-0 flex-1 overflow-hidden align-middle" title={node.title}>
+              <span>{sectionIcon(node.nodeType)}</span>
+              <span className="truncate">{shortenSectionTitle(node.title)}</span>
+            </span>
+            <span className={cn('ml-1 text-xs align-middle shrink-0 whitespace-nowrap', isDarkTheme ? 'text-slate-400' : 'text-gray-500')}>[{chunkTotal}块]</span>
           </button>
         </div>
         {!isCollapsed && hasChildren && <div className="mt-1">{renderOutline(node.children, depth + 1)}</div>}
@@ -290,21 +391,21 @@ export function DocumentDetailPanel({
         </button>
       </div>
 
-      <div className="flex-1 overflow-auto p-6">
-        <div className="max-w-[1600px] mx-auto grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)_280px]">
-          <aside className={cn('rounded-lg border p-4 h-fit', isDarkTheme ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200')}>
+      <div className="flex-1 overflow-hidden p-6">
+        <div className="max-w-[1720px] mx-auto h-full grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)_300px]">
+          <aside className={cn('rounded-lg border p-4 sticky top-6 self-start h-[calc(100vh-7rem)] min-h-[560px] overflow-auto', isDarkTheme ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200')}>
             <h3 className={cn('text-sm font-semibold mb-3', isDarkTheme ? 'text-slate-100' : 'text-gray-800')}>{locale.detailOutlineTitle}</h3>
             <div className="space-y-1">
               {outline.roots.length > 0 ? renderOutline(outline.roots) : <p className={cn('text-sm', isDarkTheme ? 'text-slate-400' : 'text-gray-400')}>{locale.detailNoOutline}</p>}
             </div>
           </aside>
 
-          <section className={cn('rounded-lg border p-4', isDarkTheme ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200')}>
-            <div className="mb-4">
+          <section className={cn('relative rounded-lg border h-[calc(100vh-7rem)] overflow-auto', isDarkTheme ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200')}>
+            <div className={cn('sticky top-0 z-20 px-4 pt-2 pb-3 border-b min-h-[74px] flex flex-col justify-center', isDarkTheme ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-100')}>
               <h2 className={cn('text-xl font-semibold', isDarkTheme ? 'text-slate-100' : 'text-gray-900')}>{details.name}</h2>
               <p className={cn('text-xs mt-1', isDarkTheme ? 'text-slate-400' : 'text-gray-500')}>{locale.detailChunkHint}</p>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-3 px-4 pb-4 pt-3">
               {details.chunks?.map((chunk) => {
                 const isHighlighted = focusedChunkId === chunk.id;
                 const isExpanded = !!expandedChunks[chunk.id];
@@ -314,25 +415,35 @@ export function DocumentDetailPanel({
                 return (
                   <div
                     key={chunk.id}
-                    ref={isHighlighted ? highlightedRef : null}
+                    ref={(node) => {
+                      chunkRefs.current[chunk.id] = node;
+                      if (isHighlighted) highlightedRef.current = node;
+                    }}
+                    data-chunk-id={chunk.id}
                     data-testid={`detail-chunk-${chunk.id}`}
                     className={cn(
-                      'rounded-lg border p-4 transition-all',
-                      isDarkTheme ? 'bg-slate-800 border-slate-700 hover:border-sky-400' : 'bg-gray-50 border-gray-200 hover:border-[#1677FF]',
+                      'rounded-lg border p-4 transition-all shadow-sm',
+                      isDarkTheme ? 'bg-slate-800 border-slate-700 hover:border-sky-400' : 'bg-[#F8F9FA] border-gray-200 hover:border-[#1677FF]',
                       isHighlighted && (isDarkTheme ? 'ring-2 ring-sky-300 border-sky-400' : 'ring-2 ring-[#1677FF]/30 border-[#1677FF]'),
                     )}
                   >
                     <div className="flex flex-wrap items-center gap-2 mb-2">
                       <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-[#1677FF] text-white">Chunk #{chunk.index + 1}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (section?.id) setActiveSectionId(section.id);
-                        }}
-                        className={cn('text-xs px-2 py-0.5 rounded border', isDarkTheme ? 'text-sky-200 border-sky-700 hover:bg-slate-700' : 'text-blue-700 border-blue-200 hover:bg-blue-50')}
+                      <span
+                        className={cn('text-xs px-2 py-0.5 rounded border max-w-[220px] truncate', isDarkTheme ? 'text-slate-200 border-slate-600' : 'text-gray-700 border-gray-300')}
+                        title={(chunk.hierarchy ?? []).join(' / ') || section?.title || '-'}
                       >
-                        {locale.detailSectionLabel ?? '所属章节'}: {section?.title ?? `${locale.detailSectionPrefix} -`}
-                      </button>
+                        {shortenSectionTitle((chunk.hierarchy ?? []).slice(-1)[0] ?? section?.title ?? '-', 18)}
+                      </span>
+                      <span className={cn('text-xs px-2 py-0.5 rounded border', isDarkTheme ? 'text-slate-200 border-slate-600' : 'text-gray-700 border-gray-300')}>
+                        Token {chunk.tokenCount ?? '-'}
+                      </span>
+                      <span className={cn('text-xs px-2 py-0.5 rounded border', isDarkTheme ? 'text-slate-200 border-slate-600' : 'text-gray-700 border-gray-300')}>
+                        P{chunk.pageStart ?? '-'}-{chunk.pageEnd ?? '-'}
+                      </span>
+                      <span className={cn('text-xs px-2 py-0.5 rounded border uppercase', isDarkTheme ? 'text-slate-200 border-slate-600' : 'text-gray-700 border-gray-300')}>
+                        {chunk.lang ?? '-'}
+                      </span>
                       <button
                         type="button"
                         onClick={async () => {
@@ -361,8 +472,8 @@ export function DocumentDetailPanel({
                       {(locale.detailSummaryLabel ?? '摘要')}: {summary}
                     </p>
 
-                    <div className={cn('overflow-hidden transition-all duration-300', isExpanded ? 'max-h-[800px]' : 'max-h-16')}>
-                      <p className={cn('text-sm leading-6 whitespace-pre-wrap', !isExpanded && 'line-clamp-2', isDarkTheme ? 'text-slate-100' : 'text-gray-700')}>
+                    <div className={cn('overflow-hidden transition-all duration-300', isExpanded ? 'max-h-[960px]' : 'max-h-32')}>
+                      <p className={cn('text-sm leading-6 whitespace-pre-wrap', !isExpanded && 'line-clamp-6', isDarkTheme ? 'text-slate-100' : 'text-gray-700')}>
                         {chunk.content}
                       </p>
                     </div>
@@ -389,6 +500,11 @@ export function DocumentDetailPanel({
               <p className={cn(isDarkTheme ? 'text-slate-300' : 'text-gray-600')}><span className="font-medium">{locale.detailInfoUploadTime ?? '上传时间'}:</span> {details.uploadTime ? format(new Date(details.uploadTime), 'yyyy-MM-dd HH:mm') : '-'}</p>
               <p className={cn(isDarkTheme ? 'text-slate-300' : 'text-gray-600')}><span className="font-medium">{locale.detailInfoChunkCount ?? '分块总数'}:</span> {details.chunkCount}</p>
               <p className={cn(isDarkTheme ? 'text-slate-300' : 'text-gray-600')}><span className="font-medium">{locale.detailInfoCharCount ?? '字数统计'}:</span> {totalChars}</p>
+              <p className={cn(isDarkTheme ? 'text-slate-300' : 'text-gray-600')}><span className="font-medium">切块策略:</span> {details.chunkingStrategy ?? '-'}</p>
+              <p className={cn(isDarkTheme ? 'text-slate-300' : 'text-gray-600')}><span className="font-medium">重叠长度:</span> {details.overlapLength ?? 0}</p>
+              <p className={cn(isDarkTheme ? 'text-slate-300' : 'text-gray-600')}><span className="font-medium">嵌入模型:</span> {details.embeddingModel ?? '-'}</p>
+              <p className={cn(isDarkTheme ? 'text-slate-300' : 'text-gray-600')}><span className="font-medium">解析状态:</span> {details.parseStatus ?? '-'}</p>
+              <p className={cn(isDarkTheme ? 'text-slate-300' : 'text-gray-600')}><span className="font-medium">向量化状态:</span> {details.vectorStatus ?? '-'}</p>
             </div>
 
             <div className="space-y-2 mb-4">
@@ -400,6 +516,12 @@ export function DocumentDetailPanel({
               </button>
               <button type="button" onClick={() => window.print()} className={cn('w-full inline-flex items-center justify-center gap-2 rounded-lg border py-2 text-sm font-medium transition-colors', isDarkTheme ? 'border-slate-600 text-slate-200 hover:bg-slate-800' : 'border-gray-200 text-gray-700 hover:bg-gray-50')}>
                 <Printer size={14} /> {locale.detailPrintAction ?? '打印'}
+              </button>
+              <button type="button" onClick={onRechunk} className={cn('w-full inline-flex items-center justify-center gap-2 rounded-lg border py-2 text-sm font-medium transition-colors', isDarkTheme ? 'border-slate-600 text-slate-200 hover:bg-slate-800' : 'border-gray-200 text-gray-700 hover:bg-gray-50')}>
+                重新切块
+              </button>
+              <button type="button" onClick={onExportChunks} className={cn('w-full inline-flex items-center justify-center gap-2 rounded-lg border py-2 text-sm font-medium transition-colors', isDarkTheme ? 'border-slate-600 text-slate-200 hover:bg-slate-800' : 'border-gray-200 text-gray-700 hover:bg-gray-50')}>
+                导出分块
               </button>
             </div>
 

@@ -12,6 +12,12 @@ type ChunkDraftLike = {
   retrievalEligible?: boolean;
   sectionLevel?: number;
   sectionType?: string;
+  lang?: 'zh' | 'en';
+  title?: string;
+  hierarchy?: string[];
+  nodeType?: string;
+  pageStart?: number | null;
+  pageEnd?: number | null;
 };
 
 export function buildEmbeddingInputs(documentId: string, chunkDrafts: Array<{ content: string; tokenCount?: number }>) {
@@ -20,6 +26,13 @@ export function buildEmbeddingInputs(documentId: string, chunkDrafts: Array<{ co
     content: chunk.content,
     tokenCount: chunk.tokenCount,
     retrievalEligible: chunk.retrievalEligible ?? true,
+    lang: chunk.lang ?? 'zh',
+    title: chunk.title ?? chunk.sourceLabel ?? null,
+    hierarchy: Array.isArray(chunk.hierarchy) ? chunk.hierarchy : (chunk.sourceLabel ? [chunk.sourceLabel] : []),
+    level: chunk.sectionLevel ?? 1,
+    nodeType: chunk.nodeType ?? chunk.sectionType ?? 'body',
+    pageStart: chunk.pageStart ?? null,
+    pageEnd: chunk.pageEnd ?? null,
   }));
 }
 
@@ -79,6 +92,13 @@ export function buildChunkMetadataRecords(input: {
     storageStatus: 'stored',
     originStart: chunk.sourceLabel ? `${chunk.sourceLabel}:start` : 'body:start',
     originEnd: chunk.sourceLabel ? `${chunk.sourceLabel}:end` : 'body:end',
+    lang: chunk.lang ?? 'zh',
+    title: chunk.title ?? chunk.sourceLabel ?? null,
+    hierarchy: Array.isArray(chunk.hierarchy) ? chunk.hierarchy : (chunk.sourceLabel ? [chunk.sourceLabel] : []),
+    level: chunk.sectionLevel ?? 1,
+    nodeType: chunk.nodeType ?? chunk.sectionType ?? 'body',
+    pageStart: chunk.pageStart ?? null,
+    pageEnd: chunk.pageEnd ?? null,
     createdAt: input.now,
     updatedAt: input.now,
   }));
