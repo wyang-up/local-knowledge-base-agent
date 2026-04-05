@@ -1,8 +1,10 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest';
-import { chunkDocument, qualityCheckChunks, splitSentencesForTest } from './document-chunker.ts';
+import { __test__, chunkDocument, qualityCheckChunks } from './document-chunker.ts';
 import type { CleanedDocument } from './document-cleaner.ts';
+
+const { splitSentencesForTest } = __test__;
 
 function buildChunkedCleanedDocument(overrides: Partial<CleanedDocument> = {}): CleanedDocument {
   return {
@@ -203,7 +205,43 @@ describe('english sentence boundary contracts (RED)', () => {
     ]);
   });
 
-  it('handles versions, numbering and overlap without false splits (exact 4 sentences)', () => {
+  it('keeps semantic version v1.2.3 in one sentence', () => {
+    const text = 'Updated to v1.2.3 and then 2.0.1. Next sentence.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'Updated to v1.2.3 and then 2.0.1.',
+      'Next sentence.',
+    ]);
+  });
+
+  it('keeps section numbering Sec. 3.2.1 in one sentence', () => {
+    const text = 'See Sec. 3.2.1 in v1.2.3 docs. Next sentence.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'See Sec. 3.2.1 in v1.2.3 docs.',
+      'Next sentence.',
+    ]);
+  });
+
+  it('keeps equation numbering Eq. (2.1) in one sentence', () => {
+    const text = 'Refer Eq. (2.1). Next sentence.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'Refer Eq. (2.1).',
+      'Next sentence.',
+    ]);
+  });
+
+  it('keeps page range pp. 12-15 in one sentence', () => {
+    const text = 'Check pp. 12-15 now. Next sentence.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'Check pp. 12-15 now.',
+      'Next sentence.',
+    ]);
+  });
+
+  it('version + numbering overlap regression stays exact 4 sentences', () => {
     const text = 'Updated to v1.2.3 and then 2.0.1. See Sec. 3.2.1 in v1.2.3 docs. Refer Eq. (2.1). Check pp. 12-15 now.';
 
     expect(splitSentencesForTest(text)).toEqual([
@@ -214,7 +252,34 @@ describe('english sentence boundary contracts (RED)', () => {
     ]);
   });
 
-  it('uses single-dot context rules for etc, No., and Fig. (exact 3 sentences)', () => {
+  it('keeps etc. at sentence end as a valid boundary', () => {
+    const text = 'This is enough, etc. Another sentence.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'This is enough, etc.',
+      'Another sentence.',
+    ]);
+  });
+
+  it('keeps No. 12 together in one sentence', () => {
+    const text = 'See No. 12 for proof. Another sentence.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'See No. 12 for proof.',
+      'Another sentence.',
+    ]);
+  });
+
+  it('keeps Fig. 3 together in one sentence', () => {
+    const text = 'See Fig. 3 for proof. Another sentence.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'See Fig. 3 for proof.',
+      'Another sentence.',
+    ]);
+  });
+
+  it('etc/No/Fig regression stays exact 3 sentences', () => {
     const text = 'This is enough, etc. Another sentence. See No. 12 and Fig. 3 for proof.';
 
     expect(splitSentencesForTest(text)).toEqual([
