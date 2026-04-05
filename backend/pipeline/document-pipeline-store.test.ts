@@ -124,4 +124,80 @@ describe('document-pipeline-store', () => {
       resumeInvalidReason: 'source-md5-changed',
     });
   });
+
+  it('clears chunk metadata, checkpoint, and job records for a deleted document', async () => {
+    const db = await open({ filename: ':memory:', driver: sqlite3.Database });
+    const store = await createDocumentPipelineStore(db);
+
+    await store.upsertJob({
+      jobId: 'doc-1',
+      documentId: 'doc-1',
+      priority: 1,
+      queuePosition: 1,
+      currentStage: 'completed',
+      jobStatus: 'completed',
+      processedUnits: 1,
+      totalUnits: 1,
+      stageProgress: 100,
+      overallProgress: 100,
+      retryCount: 0,
+      resumeEligible: false,
+      resumeInvalidReason: null,
+      message: 'done',
+      errorCode: null,
+      errorMessage: null,
+      lastSuccessfulStage: 'completed',
+      lastCheckpointAt: '2026-04-05T10:00:00.000Z',
+      createdAt: '2026-04-05T10:00:00.000Z',
+      startedAt: '2026-04-05T10:00:00.000Z',
+      finishedAt: '2026-04-05T10:00:00.000Z',
+      updatedAt: '2026-04-05T10:00:00.000Z',
+    });
+    await store.saveCheckpoint({
+      jobId: 'doc-1',
+      documentId: 'doc-1',
+      lastSuccessfulStage: 'completed',
+      processedUnits: 1,
+      totalUnits: 1,
+      resumeEligible: false,
+      resumeInvalidReason: null,
+      updatedAt: '2026-04-05T10:00:00.000Z',
+    });
+    await store.replaceChunkMetadata('doc-1', [{
+      chunkId: 'chunk-1',
+      documentId: 'doc-1',
+      fileName: 'a.pdf',
+      fileType: 'pdf',
+      sourcePath: '/tmp/a.pdf',
+      sourceUnit: 'heading',
+      sourceLabel: '第一章',
+      chunkIndex: 0,
+      tokenCount: 120,
+      charCount: 300,
+      overlapTokenCount: 40,
+      qualityStatus: 'passed',
+      qualityNote: '',
+      cleaningApplied: ['remove_header'],
+      embeddingModel: 'bge-m3',
+      vectorDimension: 1024,
+      storageStatus: 'stored',
+      originStart: 'p1',
+      originEnd: 'p2',
+      lang: 'zh',
+      title: '第一章',
+      hierarchy: ['第一章'],
+      level: 1,
+      nodeType: 'chapter',
+      pageStart: 1,
+      pageEnd: 2,
+      createdAt: '2026-04-05T10:00:00.000Z',
+      updatedAt: '2026-04-05T10:00:00.000Z',
+    }]);
+
+    await store.clearDocumentData('doc-1');
+
+    expect(await store.getJob('doc-1')).toBeNull();
+    expect(await store.getCheckpointByDocument('doc-1')).toBeNull();
+    expect(await store.listChunkMetadata('doc-1')).toEqual([]);
+  });
 });

@@ -30,6 +30,7 @@ import { storeEmbeddedChunks } from './pipeline/document-storage-writer.ts';
 import { createDocumentPipelineRunner } from './pipeline/document-pipeline-runner.ts';
 import { buildChunkMetadataRecords, buildEmbeddingInputs, buildFailureRecoveryInput, resolvePipelineErrorCode } from './pipeline/document-pipeline-helpers.ts';
 import { createDocumentPipelineStages } from './pipeline/document-pipeline-stages.ts';
+import { deleteDocumentResources } from './pipeline/document-delete.ts';
 import { resolveResumeStage, type DocumentJobRecord, type PipelineStage } from './pipeline/document-pipeline-types.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -762,10 +763,17 @@ async function startServer() {
 
   app.delete('/api/documents/:id', async (req, res) => {
     const docId = req.params.id;
-    if (chunkTable) {
-      await chunkTable.delete(`docId = '${docId}'`);
-    }
-    await db.run('DELETE FROM documents WHERE id = ?', docId);
+    const doc = await db.get('SELECT id, filePath FROM documents WHERE id = ?', docId);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+    await deleteDocumentResources({
+      documentId: docId,
+      filePath: doc.filePath,
+      chunkTable,
+      clearDocumentData: (documentId) => pipelineStore.clearDocumentData?.(documentId),
+      deleteDocumentRow: (documentId) => db.run('DELETE FROM documents WHERE id = ?', documentId),
+    });
+
     res.json({ success: true });
   });
 
