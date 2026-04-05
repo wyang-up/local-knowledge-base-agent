@@ -59,6 +59,21 @@ function splitParagraphIntoSentences(paragraph: string) {
   return splitSentencesByBoundary(paragraph);
 }
 
+function normalizeText(text: string) {
+  return text.replace(/\r/g, '').replace(/[ \t]+/g, ' ').trim();
+}
+
+function splitBySentences(text: string) {
+  const normalized = normalizeText(text);
+  if (!normalized) return [] as string[];
+  const byBoundary = splitSentencesByBoundary(normalized);
+  if (byBoundary.length > 0) {
+    return byBoundary.map((item) => item.trim()).filter(Boolean);
+  }
+  const hits = normalized.match(SENTENCE_REGEX);
+  return (hits ?? [normalized]).map((item) => item.trim()).filter(Boolean);
+}
+
 function tailOverlap(parts: string[], targetToken: number) {
   const selected: string[] = [];
   let count = 0;

@@ -2112,7 +2112,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', {name: '展开溯源'}));
     await user.click(await screen.findByRole('button', {name: '失败文档.pdf - 第1分块'}));
 
-    expect(await screen.findByText('向量分块列表')).toBeInTheDocument();
+    expect(await screen.findByText('目录大纲')).toBeInTheDocument();
     expect(screen.getByTestId('detail-chunk-chunk-1').className).toContain('ring-2');
   });
 });

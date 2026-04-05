@@ -16,8 +16,8 @@ describe('document-pipeline-helpers', () => {
     ]);
 
     expect(inputs).toEqual([
-      { chunkId: 'doc-1-0', content: 'alpha', tokenCount: 10 },
-      { chunkId: 'doc-1-1', content: 'beta', tokenCount: 20 },
+      { chunkId: 'doc-1-0', content: 'alpha', tokenCount: 10, retrievalEligible: true },
+      { chunkId: 'doc-1-1', content: 'beta', tokenCount: 20, retrievalEligible: true },
     ]);
   });
 
