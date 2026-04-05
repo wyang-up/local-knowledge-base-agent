@@ -1,8 +1,18 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest';
-import { chunkDocument, qualityCheckChunks } from './document-chunker.ts';
+import * as documentChunker from './document-chunker.ts';
 import type { CleanedDocument } from './document-cleaner.ts';
+
+const { chunkDocument, qualityCheckChunks } = documentChunker;
+
+function splitSentencesForTest(text: string) {
+  const candidate = (documentChunker as { splitSentencesForTest?: (input: string) => string[] }).splitSentencesForTest;
+  if (typeof candidate !== 'function') {
+    throw new Error('splitSentencesForTest is not implemented');
+  }
+  return candidate(text);
+}
 
 function buildChunkedCleanedDocument(overrides: Partial<CleanedDocument> = {}): CleanedDocument {
   return {
@@ -151,5 +161,49 @@ describe('document-chunker', () => {
     expect(chunks.some((chunk) => chunk.qualityStatus === 'split')).toBe(true);
     expect(chunks.some((chunk) => chunk.sourceLabel === 'Chapter 9')).toBe(true);
     expect(chunks.every((chunk) => chunk.tokenCount > 0)).toBe(true);
+  });
+});
+
+describe('english sentence boundary contracts (RED)', () => {
+  it('keeps multi-dot abbreviations and titles while splitting into exact 5 sentences', () => {
+    const text = 'We use e.g. transformers and i.e. attention blocks. Dr. Smith arrived. He lived in the U.S. market for years. He moved to the U.S. Another line starts.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'We use e.g. transformers and i.e. attention blocks.',
+      'Dr. Smith arrived.',
+      'He lived in the U.S. market for years.',
+      'He moved to the U.S.',
+      'Another line starts.',
+    ]);
+  });
+
+  it('handles versions, numbering and overlap without false splits (exact 4 sentences)', () => {
+    const text = 'Updated to v1.2.3 and then 2.0.1. See Sec. 3.2.1 in v1.2.3 docs. Refer Eq. (2.1). Check pp. 12-15 now.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'Updated to v1.2.3 and then 2.0.1.',
+      'See Sec. 3.2.1 in v1.2.3 docs.',
+      'Refer Eq. (2.1).',
+      'Check pp. 12-15 now.',
+    ]);
+  });
+
+  it('uses single-dot context rules for etc, No., and Fig. (exact 3 sentences)', () => {
+    const text = 'This is enough, etc. Another sentence. See No. 12 and Fig. 3 for proof.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'This is enough, etc.',
+      'Another sentence.',
+      'See No. 12 and Fig. 3 for proof.',
+    ]);
+  });
+
+  it('counterexample: still splits normal boundary after title abbreviation', () => {
+    const text = 'Dr. Smith arrived. Next topic.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'Dr. Smith arrived.',
+      'Next topic.',
+    ]);
   });
 });
