@@ -47,3 +47,16 @@ Exit codes:
 - Startup observability implementation is now decoupled from pipeline modules (server-local env parsing, no `pipeline/*` import for this flag log).
 - Boundary contract test suite passes.
 - Backend lint is currently failing due to pre-existing `cors` module typing resolution and needs environment/dependency follow-up outside this task.
+
+## Final Regression Gate Result
+
+- Latest confirmed gate status:
+  - `npx vitest run backend/pipeline/document-chunker.test.ts` -> PASS
+  - `npm run lint:backend` -> PASS (after backend dependencies installed)
+  - `npm run start --prefix backend` -> startup successful and logs `english_boundary_protection=enabled`
+- Key output notes:
+  - Chunker regression remains green (`Tests 34 passed`).
+  - Backend lint now completes with `tsc --noEmit` exit code `0`.
+  - Startup observability log is present at boot and reports boundary protection state.
+- Follow-up clarification:
+  - Earlier `lint:backend` failures in this document were caused by missing backend dependency resolution in the execution environment; after backend dependencies were installed, lint passed.
