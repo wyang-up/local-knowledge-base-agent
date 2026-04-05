@@ -1,4 +1,5 @@
 import type { CleanedDocument } from './document-cleaner.ts';
+import { splitSentencesByBoundary } from './document-sentence-splitter.ts';
 
 type ChunkDraft = {
   sourceUnit: 'body' | 'heading' | 'sheet' | 'json_node';
@@ -13,7 +14,6 @@ function estimateTokens(text: string) {
   return Math.max(1, Math.ceil(text.length / 2));
 }
 
-const SENTENCE_BOUNDARY_REGEX = /(?<=[。！？；.!?;])(?:\s+|$)/;
 const HEADING_REGEXES = [
   /^chapter\s+\d+[\w.-]*$/i,
   /^section\s+\d+[\w.-]*$/i,
@@ -40,12 +40,7 @@ function isHeadingCandidate(line: string) {
 }
 
 function splitParagraphIntoSentences(paragraph: string) {
-  const normalized = normalizeWhitespace(paragraph);
-  if (!normalized) return [] as string[];
-  const matches = normalized.match(/[^。！？；.!?;]+[。！？；.!?;]?/g);
-  return (matches ?? [normalized])
-    .map((segment) => segment.trim())
-    .filter(Boolean);
+  return splitSentencesByBoundary(paragraph);
 }
 
 function splitPdfDocxIntoSegments(text: string) {
