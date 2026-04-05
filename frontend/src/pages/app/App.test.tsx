@@ -386,14 +386,18 @@ describe('App', () => {
     const searchInput = await screen.findByPlaceholderText('搜索会话或内容');
     await user.type(searchInput, '预算');
 
-    expect(screen.getByText('预算复盘')).toBeInTheDocument();
-    expect(screen.queryByText('日报同步')).not.toBeInTheDocument();
+    const conversationPanel = searchInput.closest('div')?.parentElement?.parentElement;
+    expect(conversationPanel).not.toBeNull();
+    const conversationScope = within(conversationPanel as HTMLElement);
+
+    expect(conversationScope.getByText('预算复盘')).toBeInTheDocument();
+    expect(conversationScope.queryByText('日报同步')).not.toBeInTheDocument();
 
     fireEvent.change(searchInput, { target: { value: '' } });
     await user.click(screen.getByRole('button', { name: '学习' }));
 
-    expect(screen.getByText('日报同步')).toBeInTheDocument();
-    expect(screen.queryByText('预算复盘')).not.toBeInTheDocument();
+    expect(conversationScope.getByText('日报同步')).toBeInTheDocument();
+    expect(conversationScope.queryByText('预算复盘')).not.toBeInTheDocument();
   });
 
   it('keeps qa input editable after switching to qa tab', async () => {
