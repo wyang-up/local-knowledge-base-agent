@@ -1,6 +1,6 @@
 import {format} from 'date-fns';
-import {useEffect, useRef, useState} from 'react';
-import {ArrowLeft, ChevronDown, Clock, FileSpreadsheet, MoreHorizontal, Settings} from 'lucide-react';
+import {useEffect, useMemo, useRef, useState} from 'react';
+import {ArrowLeft, ChevronDown, ChevronRight, Copy, Download, Printer, Settings, Share2} from 'lucide-react';
 import {cn} from '../../../shared/lib/utils';
 import type {Chunk, Document} from '../../../shared/types';
 
@@ -17,6 +17,20 @@ type DocumentDetailLocale = {
   detailChunkHint: string;
   detailChunkTag: string;
   detailExpand: string;
+  detailCollapse?: string;
+  detailSummaryLabel?: string;
+  detailSectionLabel?: string;
+  detailCopyAction?: string;
+  detailCopySuccess?: string;
+  detailDownloadAction?: string;
+  detailShareAction?: string;
+  detailPrintAction?: string;
+  detailInfoTitle?: string;
+  detailInfoSize?: string;
+  detailInfoType?: string;
+  detailInfoUploadTime?: string;
+  detailInfoChunkCount?: string;
+  detailInfoCharCount?: string;
   tabSettings: string;
 };
 
@@ -31,6 +45,109 @@ type DocumentDetailPanelProps = {
   onOpenSettings: () => void;
 };
 
+type OutlineNode = {
+  id: string;
+  title: string;
+  level: number;
+  chunkIds: string[];
+  children: OutlineNode[];
+};
+
+type HeadingMatch = {title: string; level: number} | null;
+
+function summarize(content: string) {
+  const compact = content.replace(/\s+/g, ' ').trim();
+  if (!compact) return '-';
+  return compact.length > 52 ? `${compact.slice(0, 52)}...` : compact;
+}
+
+function extractHeading(content: string): HeadingMatch {
+  const line = content.split('\n').map((item) => item.trim()).find(Boolean) ?? '';
+  if (!line) return null;
+
+  const markdown = line.match(/^(#{1,6})\s+(.+)$/);
+  if (markdown) {
+    return {title: markdown[2].trim(), level: markdown[1].length};
+  }
+
+  const cnNumeric = line.match(/^(\d+(?:\.\d+)*)[\s、.．]+(.+)$/);
+  if (cnNumeric) {
+    return {title: `${cnNumeric[1]} ${cnNumeric[2].trim()}`, level: cnNumeric[1].split('.').length};
+  }
+
+  const chapter = line.match(/^(Chapter\s+\d+[:\-\s].+|第[一二三四五六七八九十百千\d]+[章节回篇].*)$/i);
+  if (chapter) {
+    return {title: chapter[1].trim(), level: 1};
+  }
+
+  return null;
+}
+
+function buildOutline(chunks: Chunk[], fallbackPrefix: string): {
+  roots: OutlineNode[];
+  sectionByChunkId: Record<string, {id: string; title: string}>;
+} {
+  const roots: OutlineNode[] = [];
+  const stack: OutlineNode[] = [];
+  const sectionByChunkId: Record<string, {id: string; title: string}> = {};
+  const fallbackNode: OutlineNode = {
+    id: 'section-fallback',
+    title: `${fallbackPrefix} 未命名`,
+    level: 1,
+    chunkIds: [],
+    children: [],
+  };
+
+  chunks.forEach((chunk, index) => {
+    const heading = extractHeading(chunk.content);
+    if (heading) {
+      const node: OutlineNode = {
+        id: `section-${chunk.id}`,
+        title: heading.title,
+        level: Math.max(1, Math.min(heading.level, 6)),
+        chunkIds: [chunk.id],
+        children: [],
+      };
+
+      while (stack.length && stack[stack.length - 1].level >= node.level) {
+        stack.pop();
+      }
+
+      if (stack.length === 0) {
+        roots.push(node);
+      } else {
+        stack[stack.length - 1].children.push(node);
+      }
+      stack.push(node);
+      sectionByChunkId[chunk.id] = {id: node.id, title: node.title};
+      return;
+    }
+
+    const active = stack[stack.length - 1];
+    if (active) {
+      active.chunkIds.push(chunk.id);
+      sectionByChunkId[chunk.id] = {id: active.id, title: active.title};
+      return;
+    }
+
+    fallbackNode.chunkIds.push(chunk.id);
+    sectionByChunkId[chunk.id] = {id: fallbackNode.id, title: fallbackNode.title};
+    if (!roots.find((node) => node.id === fallbackNode.id)) {
+      roots.push(fallbackNode);
+    }
+
+    if (index === 0 && !chunks.some((item) => extractHeading(item.content))) {
+      fallbackNode.title = `${fallbackPrefix} 1`;
+    }
+  });
+
+  return {roots, sectionByChunkId};
+}
+
+function collectChunkIds(node: OutlineNode): string[] {
+  return [...node.chunkIds, ...node.children.flatMap(collectChunkIds)];
+}
+
 export function DocumentDetailPanel({
   isDarkTheme,
   locale,
@@ -44,6 +161,20 @@ export function DocumentDetailPanel({
   const highlightedRef = useRef<HTMLDivElement | null>(null);
   const [focusedChunkId, setFocusedChunkId] = useState<string | null>(highlightedChunkId);
   const [descriptionDraft, setDescriptionDraft] = useState(details.description || '');
+  const [expandedChunks, setExpandedChunks] = useState<Record<string, boolean>>({});
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
+  const [copiedChunkId, setCopiedChunkId] = useState<string | null>(null);
+
+  const outline = useMemo(
+    () => buildOutline(details.chunks || [], locale.detailSectionPrefix),
+    [details.chunks, locale.detailSectionPrefix],
+  );
+
+  const totalChars = useMemo(
+    () => (details.chunks || []).reduce((sum, chunk) => sum + chunk.content.length, 0),
+    [details.chunks],
+  );
 
   useEffect(() => {
     setDescriptionDraft(details.description || '');
@@ -52,13 +183,19 @@ export function DocumentDetailPanel({
   useEffect(() => {
     if (highlightedChunkId) {
       setFocusedChunkId(highlightedChunkId);
+      const section = outline.sectionByChunkId[highlightedChunkId];
+      setActiveSectionId(section?.id ?? null);
       return;
     }
     if (highlightedChunkIndex !== null && highlightedChunkIndex !== undefined) {
       const target = details.chunks?.find((chunk) => chunk.index === highlightedChunkIndex);
       setFocusedChunkId(target?.id ?? null);
+      if (target?.id) {
+        const section = outline.sectionByChunkId[target.id];
+        setActiveSectionId(section?.id ?? null);
+      }
     }
-  }, [highlightedChunkId, highlightedChunkIndex, details.chunks]);
+  }, [highlightedChunkId, highlightedChunkIndex, details.chunks, outline.sectionByChunkId]);
 
   useEffect(() => {
     if (highlightedRef.current) {
@@ -71,6 +208,67 @@ export function DocumentDetailPanel({
     if (normalized === (details.description || '').trim()) return;
     onSaveDescription(normalized);
   };
+
+  const jumpToSection = (node: OutlineNode) => {
+    const ids = collectChunkIds(node);
+    if (!ids.length) return;
+    setActiveSectionId(node.id);
+    setFocusedChunkId(ids[0]);
+  };
+
+  const downloadChunks = () => {
+    const payload = details.chunks.map((chunk) => `# Chunk ${chunk.index + 1}\n\n${chunk.content}`).join('\n\n');
+    const blob = new Blob([payload], {type: 'text/plain;charset=utf-8'});
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${details.name.replace(/\.[^.]+$/, '')}-chunks.txt`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+
+  const shareDocument = async () => {
+    const text = `${details.name} · ${(details.size / 1024 / 1024).toFixed(2)}MB · ${details.chunkCount}${locale.previewMetaChunks}`;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // noop
+    }
+  };
+
+  const renderOutline = (nodes: OutlineNode[], depth = 0) => nodes.map((node) => {
+    const hasChildren = node.children.length > 0;
+    const isCollapsed = !!collapsedSections[node.id];
+    const chunkTotal = collectChunkIds(node).length;
+    const isActive = activeSectionId === node.id;
+
+    return (
+      <div key={node.id}>
+        <div className={cn('group relative flex items-center gap-1 rounded-lg', isActive && (isDarkTheme ? 'bg-sky-900/40' : 'bg-blue-50'))} style={{paddingLeft: `${depth * 14 + 8}px`}}>
+          {isActive && <span className="absolute left-0 top-1 bottom-1 w-1 rounded-r bg-[#1677FF]" />}
+          <button
+            type="button"
+            onClick={() => hasChildren && setCollapsedSections((prev) => ({...prev, [node.id]: !prev[node.id]}))}
+            className={cn('p-1 rounded', hasChildren ? '' : 'opacity-40 cursor-default')}
+            aria-label={hasChildren ? (isCollapsed ? 'expand section' : 'collapse section') : 'leaf section'}
+          >
+            {hasChildren ? (isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />) : <ChevronRight size={14} />}
+          </button>
+          <button
+            type="button"
+            onClick={() => jumpToSection(node)}
+            className={cn(
+              'flex-1 min-w-0 text-left py-2 pr-2 text-sm rounded-md transition-colors',
+              isDarkTheme ? 'text-slate-200 hover:bg-slate-800' : 'text-gray-700 hover:bg-blue-50',
+            )}
+          >
+            <span className="truncate inline-block max-w-[160px] align-middle">{node.title}</span>
+            <span className={cn('ml-2 text-xs align-middle', isDarkTheme ? 'text-slate-400' : 'text-gray-500')}>[{chunkTotal}块]</span>
+          </button>
+        </div>
+        {!isCollapsed && hasChildren && <div className="mt-1">{renderOutline(node.children, depth + 1)}</div>}
+      </div>
+    );
+  });
 
   return (
     <div className={`flex-1 flex flex-col overflow-hidden ${isDarkTheme ? 'bg-slate-950' : 'bg-gray-50'}`}>
@@ -92,90 +290,131 @@ export function DocumentDetailPanel({
         </button>
       </div>
 
-      <div className="flex-1 overflow-auto p-6 flex justify-center">
-        <div className="max-w-5xl w-full flex flex-col gap-6">
-          <div className={cn('p-6 rounded-xl shadow-sm border flex flex-col gap-4 relative', isDarkTheme ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200')}>
-            <button type="button" className={cn('absolute top-4 right-4', isDarkTheme ? 'text-slate-400 hover:text-sky-300' : 'text-gray-400 hover:text-blue-600')}><MoreHorizontal size={20}/></button>
-            <div className="flex items-start gap-4">
-              <div className={cn('w-12 h-12 rounded-lg flex items-center justify-center shrink-0', isDarkTheme ? 'bg-slate-800 text-sky-300' : 'bg-blue-50 text-blue-600')}>
-                <FileSpreadsheet size={24} />
-              </div>
-              <div>
-                <h2 className={cn('text-xl font-bold mb-1', isDarkTheme ? 'text-slate-100' : 'text-gray-800')}>{details.name}</h2>
-                <div className={cn('flex items-center gap-4 text-sm', isDarkTheme ? 'text-slate-300' : 'text-gray-500')}>
-                  <span>{(details.size / 1024 / 1024).toFixed(2)} MB</span>
-                  <span>{details.type}</span>
-                  <span className="flex items-center gap-1"><Clock size={14}/> {details.uploadTime ? format(new Date(details.uploadTime), 'yyyy-MM-dd HH:mm') : '-'}</span>
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-100">
-                    {locale.detailParsed} ({details.chunkCount} {locale.previewMetaChunks})
-                  </span>
-                </div>
-              </div>
+      <div className="flex-1 overflow-auto p-6">
+        <div className="max-w-[1600px] mx-auto grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)_280px]">
+          <aside className={cn('rounded-lg border p-4 h-fit', isDarkTheme ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200')}>
+            <h3 className={cn('text-sm font-semibold mb-3', isDarkTheme ? 'text-slate-100' : 'text-gray-800')}>{locale.detailOutlineTitle}</h3>
+            <div className="space-y-1">
+              {outline.roots.length > 0 ? renderOutline(outline.roots) : <p className={cn('text-sm', isDarkTheme ? 'text-slate-400' : 'text-gray-400')}>{locale.detailNoOutline}</p>}
             </div>
+          </aside>
+
+          <section className={cn('rounded-lg border p-4', isDarkTheme ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200')}>
+            <div className="mb-4">
+              <h2 className={cn('text-xl font-semibold', isDarkTheme ? 'text-slate-100' : 'text-gray-900')}>{details.name}</h2>
+              <p className={cn('text-xs mt-1', isDarkTheme ? 'text-slate-400' : 'text-gray-500')}>{locale.detailChunkHint}</p>
+            </div>
+            <div className="space-y-3">
+              {details.chunks?.map((chunk) => {
+                const isHighlighted = focusedChunkId === chunk.id;
+                const isExpanded = !!expandedChunks[chunk.id];
+                const section = outline.sectionByChunkId[chunk.id];
+                const summary = summarize(chunk.content);
+
+                return (
+                  <div
+                    key={chunk.id}
+                    ref={isHighlighted ? highlightedRef : null}
+                    data-testid={`detail-chunk-${chunk.id}`}
+                    className={cn(
+                      'rounded-lg border p-4 transition-all',
+                      isDarkTheme ? 'bg-slate-800 border-slate-700 hover:border-sky-400' : 'bg-gray-50 border-gray-200 hover:border-[#1677FF]',
+                      isHighlighted && (isDarkTheme ? 'ring-2 ring-sky-300 border-sky-400' : 'ring-2 ring-[#1677FF]/30 border-[#1677FF]'),
+                    )}
+                  >
+                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-[#1677FF] text-white">Chunk #{chunk.index + 1}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (section?.id) setActiveSectionId(section.id);
+                        }}
+                        className={cn('text-xs px-2 py-0.5 rounded border', isDarkTheme ? 'text-sky-200 border-sky-700 hover:bg-slate-700' : 'text-blue-700 border-blue-200 hover:bg-blue-50')}
+                      >
+                        {locale.detailSectionLabel ?? '所属章节'}: {section?.title ?? `${locale.detailSectionPrefix} -`}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(chunk.content);
+                            setCopiedChunkId(chunk.id);
+                            window.setTimeout(() => {
+                              setCopiedChunkId((current) => (current === chunk.id ? null : current));
+                            }, 1500);
+                          } catch {
+                            // noop
+                          }
+                        }}
+                        className={cn('ml-auto inline-flex items-center gap-1 text-xs', isDarkTheme ? 'text-slate-300 hover:text-sky-300' : 'text-gray-500 hover:text-blue-600')}
+                      >
+                        <Copy size={12} /> {locale.detailCopyAction ?? '复制'}
+                      </button>
+                      {copiedChunkId === chunk.id && (
+                        <span className={cn('text-xs px-2 py-0.5 rounded-md border', isDarkTheme ? 'text-emerald-300 border-emerald-700' : 'text-emerald-600 border-emerald-200 bg-emerald-50')}>
+                          {locale.detailCopySuccess ?? '复制成功'}
+                        </span>
+                      )}
+                    </div>
+
+                    <p className={cn('text-xs mb-2 truncate', isDarkTheme ? 'text-slate-400' : 'text-gray-500')}>
+                      {(locale.detailSummaryLabel ?? '摘要')}: {summary}
+                    </p>
+
+                    <div className={cn('overflow-hidden transition-all duration-300', isExpanded ? 'max-h-[800px]' : 'max-h-16')}>
+                      <p className={cn('text-sm leading-6 whitespace-pre-wrap', !isExpanded && 'line-clamp-2', isDarkTheme ? 'text-slate-100' : 'text-gray-700')}>
+                        {chunk.content}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setExpandedChunks((prev) => ({...prev, [chunk.id]: !prev[chunk.id]}))}
+                      className={cn('mt-2 text-xs inline-flex items-center gap-1', isDarkTheme ? 'text-sky-300' : 'text-[#1677FF]')}
+                    >
+                      {isExpanded ? (locale.detailCollapse ?? '收起') : locale.detailExpand}
+                      <ChevronDown size={12} className={cn('transition-transform', isExpanded && 'rotate-180')} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <aside className={cn('rounded-lg border p-4 h-fit sticky top-6', isDarkTheme ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200')}>
+            <h3 className={cn('text-sm font-semibold mb-3', isDarkTheme ? 'text-slate-100' : 'text-gray-800')}>{locale.detailInfoTitle ?? '文档信息'}</h3>
+            <div className="space-y-2 text-sm mb-4">
+              <p className={cn(isDarkTheme ? 'text-slate-300' : 'text-gray-600')}><span className="font-medium">{locale.detailInfoSize ?? '大小'}:</span> {(details.size / 1024 / 1024).toFixed(2)} MB</p>
+              <p className={cn(isDarkTheme ? 'text-slate-300' : 'text-gray-600')}><span className="font-medium">{locale.detailInfoType ?? '类型'}:</span> {details.type}</p>
+              <p className={cn(isDarkTheme ? 'text-slate-300' : 'text-gray-600')}><span className="font-medium">{locale.detailInfoUploadTime ?? '上传时间'}:</span> {details.uploadTime ? format(new Date(details.uploadTime), 'yyyy-MM-dd HH:mm') : '-'}</p>
+              <p className={cn(isDarkTheme ? 'text-slate-300' : 'text-gray-600')}><span className="font-medium">{locale.detailInfoChunkCount ?? '分块总数'}:</span> {details.chunkCount}</p>
+              <p className={cn(isDarkTheme ? 'text-slate-300' : 'text-gray-600')}><span className="font-medium">{locale.detailInfoCharCount ?? '字数统计'}:</span> {totalChars}</p>
+            </div>
+
+            <div className="space-y-2 mb-4">
+              <button type="button" onClick={downloadChunks} className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-[#1677FF] text-white py-2 text-sm font-medium hover:bg-[#0f63d8] transition-colors">
+                <Download size={14} /> {locale.detailDownloadAction ?? '下载'}
+              </button>
+              <button type="button" onClick={shareDocument} className={cn('w-full inline-flex items-center justify-center gap-2 rounded-lg border py-2 text-sm font-medium transition-colors', isDarkTheme ? 'border-slate-600 text-slate-200 hover:bg-slate-800' : 'border-gray-200 text-gray-700 hover:bg-gray-50')}>
+                <Share2 size={14} /> {locale.detailShareAction ?? '分享'}
+              </button>
+              <button type="button" onClick={() => window.print()} className={cn('w-full inline-flex items-center justify-center gap-2 rounded-lg border py-2 text-sm font-medium transition-colors', isDarkTheme ? 'border-slate-600 text-slate-200 hover:bg-slate-800' : 'border-gray-200 text-gray-700 hover:bg-gray-50')}>
+                <Printer size={14} /> {locale.detailPrintAction ?? '打印'}
+              </button>
+            </div>
+
             <div>
               <label className={cn('block text-xs font-semibold uppercase mb-1', isDarkTheme ? 'text-slate-300' : 'text-gray-500')}>{locale.detailDescriptionLabel}</label>
               <textarea
                 className={cn('w-full border rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none resize-none transition-colors', isDarkTheme ? 'border-slate-700 text-slate-100 bg-slate-800 hover:bg-slate-700' : 'border-gray-200 text-gray-700 bg-gray-50 hover:bg-white')}
-                rows={2}
+                rows={4}
                 placeholder={locale.detailDescriptionPlaceholder}
                 value={descriptionDraft}
                 onChange={(e) => setDescriptionDraft(e.target.value)}
                 onBlur={handleDescriptionBlur}
               ></textarea>
             </div>
-          </div>
-
-          <div className="flex gap-6 flex-1 min-h-0">
-            <div className={cn('w-1/3 rounded-xl shadow-sm border p-5 flex flex-col', isDarkTheme ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200')}>
-              <h3 className={cn('font-bold mb-4 pb-2 border-b', isDarkTheme ? 'text-slate-100 border-slate-700' : 'text-gray-800 border-gray-100')}>{locale.detailOutlineTitle}</h3>
-              <div className="flex-1 overflow-auto space-y-1">
-                {details.chunks?.length > 0 ? (
-                  details.chunks.slice(0, 10).map((_, idx) => (
-                    <button
-                      type="button"
-                      key={idx}
-                      onClick={() => setFocusedChunkId(details.chunks[idx]?.id ?? null)}
-                      className={cn('w-full text-left text-sm p-2 pl-6 rounded cursor-pointer transition-colors', isDarkTheme ? 'text-slate-300 hover:bg-slate-800' : 'text-gray-600 hover:bg-gray-50')}
-                    >
-                      {locale.detailSectionPrefix} {idx + 1}
-                    </button>
-                  ))
-                ) : (
-                  <div className={cn('text-sm p-2', isDarkTheme ? 'text-slate-400' : 'text-gray-400')}>{locale.detailNoOutline}</div>
-                )}
-              </div>
-            </div>
-
-            <div className={cn('w-2/3 rounded-xl shadow-sm border p-5 flex flex-col', isDarkTheme ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200')}>
-              <h3 className={cn('font-bold mb-4 pb-2 border-b', isDarkTheme ? 'text-slate-100 border-slate-700' : 'text-gray-800 border-gray-100')}>{locale.detailChunkTitle} <span className={cn('text-xs font-normal ml-2', isDarkTheme ? 'text-slate-300' : 'text-gray-500')}>{locale.detailChunkHint}</span></h3>
-              <div className="flex-1 overflow-auto space-y-3 pr-2">
-                {details.chunks?.map((chunk) => {
-                  const isHighlighted = focusedChunkId === chunk.id;
-
-                  return (
-                  <div
-                    key={chunk.id}
-                    ref={isHighlighted ? highlightedRef : null}
-                    data-testid={`detail-chunk-${chunk.id}`}
-                    className={cn(
-                      'border rounded-lg p-4 hover:shadow-sm transition-all group',
-                      isDarkTheme ? 'border-slate-700 bg-slate-800/60 hover:border-sky-400' : 'border-gray-200 bg-gray-50/50 hover:border-blue-300',
-                      isHighlighted && (isDarkTheme ? 'ring-2 ring-sky-300 border-sky-400' : 'ring-2 ring-blue-300 border-blue-400 bg-blue-50/70'),
-                    )}
-                  >
-                    <div className="flex justify-between items-center mb-2">
-                      <span className={cn('text-xs font-bold px-2 py-0.5 rounded', isDarkTheme ? 'text-sky-200 bg-sky-900/50' : 'text-blue-600 bg-blue-100')}>{locale.detailChunkTag} #{(chunk.index || 0) + 1}</span>
-                      <button type="button" className={cn('text-xs flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity', isDarkTheme ? 'text-slate-300 hover:text-sky-300' : 'text-gray-400 hover:text-blue-600')}>
-                        {locale.detailExpand} <ChevronDown size={12}/>
-                      </button>
-                    </div>
-                    <p className={cn('text-sm leading-relaxed line-clamp-2', isDarkTheme ? 'text-slate-100' : 'text-gray-700')}>{chunk.content}</p>
-                  </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+          </aside>
         </div>
       </div>
     </div>

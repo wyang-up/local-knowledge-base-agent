@@ -200,6 +200,16 @@ function debugStartup(...args: unknown[]) {
   }
 }
 
+function isEnglishBoundaryProtectionEnabledForStartupLog() {
+  const raw = process.env.ENABLE_ENGLISH_BOUNDARY_PROTECTION;
+  if (raw === undefined) {
+    return true;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  return normalized !== '0' && normalized !== 'false' && normalized !== 'off';
+}
+
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 if (!fs.existsSync(LANCE_PATH)) fs.mkdirSync(LANCE_PATH, { recursive: true });
@@ -1015,6 +1025,7 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Backend running at http://localhost:${PORT}`);
+    console.log(`english_boundary_protection=${isEnglishBoundaryProtectionEnabledForStartupLog() ? 'enabled' : 'disabled'}`);
   });
 }
 

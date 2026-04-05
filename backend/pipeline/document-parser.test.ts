@@ -5,7 +5,7 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as xlsx from 'xlsx';
-import { parseDocument } from './document-parser.ts';
+import { parseDocument, resolveXlsxApi } from './document-parser.ts';
 
 const tempDirs: string[] = [];
 
@@ -20,6 +20,18 @@ afterEach(async () => {
 });
 
 describe('document-parser', () => {
+  it('resolves xlsx api from namespace or default export', () => {
+    const namespaceApi = { readFile: () => ({ SheetNames: [], Sheets: {} }), utils: { sheet_to_json: () => [] } };
+    const defaultApi = { default: namespaceApi };
+
+    expect(resolveXlsxApi(namespaceApi)).toBe(namespaceApi);
+    expect(resolveXlsxApi(defaultApi)).toBe(namespaceApi);
+  });
+
+  it('throws when xlsx api shape is unavailable', () => {
+    expect(() => resolveXlsxApi({})).toThrow('xlsx api unavailable');
+  });
+
   it('parses gb18030 txt without mojibake', async () => {
     const dir = await makeTempDir();
     const filePath = path.join(dir, 'sample.txt');
