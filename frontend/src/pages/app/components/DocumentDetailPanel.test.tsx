@@ -94,7 +94,7 @@ describe('DocumentDetailPanel', () => {
       />,
     );
 
-    fireEvent.click(screen.getByText('第二章'));
+    fireEvent.click(screen.getAllByText('第二章')[0]!);
 
     expect(screen.getByTestId('detail-chunk-c2').className).toContain('ring-2');
   });
@@ -184,11 +184,123 @@ describe('DocumentDetailPanel', () => {
     );
 
     const content = screen.getByText('第一块内容');
-    expect(content.className).toContain('line-clamp-2');
+    expect(content.className).toContain('line-clamp-6');
 
     fireEvent.click(screen.getByRole('button', {name: '展开全文'}));
 
-    expect(content.className).not.toContain('line-clamp-2');
+    expect(content.className).not.toContain('line-clamp-6');
+  });
+
+  it('renders metadata-first hierarchy and status controls', () => {
+    const onRechunk = vi.fn();
+    const onExportChunks = vi.fn();
+    render(
+      <DocumentDetailPanel
+        isDarkTheme={false}
+        locale={{
+          backToDocs: '返回文档库',
+          tabSettings: '设置',
+          detailParsed: '已解析',
+          previewMetaChunks: '分块',
+          detailDescriptionLabel: '文档描述',
+          detailDescriptionPlaceholder: '添加文档描述...',
+          detailOutlineTitle: '目录导航',
+          detailNoOutline: '暂无目录',
+          detailSectionPrefix: '章节',
+          detailChunkTitle: '分块内容',
+          detailChunkHint: '点击查看详情',
+          detailChunkTag: '分块',
+          detailExpand: '展开',
+        }}
+        details={{
+          id: 'doc-1',
+          name: '样例文档.pdf',
+          size: 1024,
+          type: '.pdf',
+          uploadTime: '2026-03-30T00:00:00.000Z',
+          status: 'completed',
+          chunkCount: 1,
+          description: '',
+          parseStatus: 'completed',
+          vectorStatus: 'completed',
+          chunkingStrategy: 'sentence-window + quality-check',
+          overlapLength: 80,
+          embeddingModel: 'bge-m3',
+          chunks: [
+            {
+              id: 'c1',
+              docId: 'doc-1',
+              index: 0,
+              content: '第一块内容',
+              tokenCount: 120,
+              hierarchy: ['摘要', '第一章'],
+              nodeType: 'abstract',
+              pageStart: 1,
+              pageEnd: 2,
+              lang: 'zh',
+            },
+          ],
+        }}
+        onSaveDescription={vi.fn()}
+        onBack={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onRechunk={onRechunk}
+        onExportChunks={onExportChunks}
+      />,
+    );
+
+    expect(screen.getByText('📌')).toBeInTheDocument();
+    expect(screen.getAllByText('第一章').length).toBeGreaterThan(0);
+    expect(screen.getByText('Token 120')).toBeInTheDocument();
+    expect(screen.getByText('P1-2')).toBeInTheDocument();
+    expect(screen.getByText('zh')).toBeInTheDocument();
+    expect(screen.queryByText(/所属章节:/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', {name: '重新切块'}));
+    fireEvent.click(screen.getByRole('button', {name: '导出分块'}));
+    expect(onRechunk).toHaveBeenCalled();
+    expect(onExportChunks).toHaveBeenCalled();
+  });
+
+  it('truncates section title to 18 chars while preserving full title in tooltip', () => {
+    const longTitle = 'A Methodological Exploration of Domain Division Modeling';
+
+    render(
+      <DocumentDetailPanel
+        isDarkTheme={false}
+        locale={{
+          backToDocs: '返回文档库',
+          tabSettings: '设置',
+          detailParsed: '已解析',
+          previewMetaChunks: '分块',
+          detailDescriptionLabel: '文档描述',
+          detailDescriptionPlaceholder: '添加文档描述...',
+          detailOutlineTitle: '目录导航',
+          detailNoOutline: '暂无目录',
+          detailSectionPrefix: '章节',
+          detailChunkTitle: '分块内容',
+          detailChunkHint: '点击查看详情',
+          detailChunkTag: '分块',
+          detailExpand: '展开',
+        }}
+        details={{
+          id: 'doc-1',
+          name: '样例文档.pdf',
+          size: 1024,
+          type: '.pdf',
+          uploadTime: '2026-03-30T00:00:00.000Z',
+          status: 'completed',
+          chunkCount: 1,
+          description: '',
+          chunks: [{id: 'c1', docId: 'doc-1', index: 0, content: '正文', hierarchy: [longTitle]}],
+        }}
+        onSaveDescription={vi.fn()}
+        onBack={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText('A Methodological E...').length).toBeGreaterThan(0);
+    expect(screen.getAllByTitle(longTitle).length).toBeGreaterThan(0);
   });
 
   it('shows section chunk count and quick action buttons', () => {
@@ -234,6 +346,53 @@ describe('DocumentDetailPanel', () => {
     expect(screen.getByRole('button', {name: '下载'})).toBeInTheDocument();
     expect(screen.getByRole('button', {name: '分享'})).toBeInTheDocument();
     expect(screen.getByRole('button', {name: '打印'})).toBeInTheDocument();
+  });
+
+  it('keeps title and outline panel sticky with one-line outline rows', () => {
+    render(
+      <DocumentDetailPanel
+        isDarkTheme={false}
+        locale={{
+          backToDocs: '返回文档库',
+          tabSettings: '设置',
+          detailParsed: '已解析',
+          previewMetaChunks: '分块',
+          detailDescriptionLabel: '文档描述',
+          detailDescriptionPlaceholder: '添加文档描述...',
+          detailOutlineTitle: '目录大纲',
+          detailNoOutline: '暂无目录',
+          detailSectionPrefix: '章节',
+          detailChunkTitle: '分块内容',
+          detailChunkHint: '点击查看详情',
+          detailChunkTag: '分块',
+          detailExpand: '展开',
+        }}
+        details={{
+          id: 'doc-1',
+          name: '样例文档.pdf',
+          size: 1024,
+          type: '.pdf',
+          uploadTime: '2026-03-30T00:00:00.000Z',
+          status: 'completed',
+          chunkCount: 1,
+          description: '',
+          chunks: [{id: 'c1', docId: 'doc-1', index: 0, content: '# 第一章\n第一块内容'}],
+        }}
+        onSaveDescription={vi.fn()}
+        onBack={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    const titleWrapper = screen.getByText('样例文档.pdf').closest('div');
+    expect(titleWrapper?.className).toContain('sticky');
+
+    const outlinePanel = screen.getByText('目录大纲').closest('aside');
+    expect(outlinePanel?.className).toContain('sticky');
+    expect(outlinePanel?.className).toContain('min-h-');
+
+    const outlineRow = screen.getAllByText('第一章')[0]?.closest('button');
+    expect(outlineRow?.className).toContain('whitespace-nowrap');
   });
 
   it('shows copied reminder after copying chunk content', async () => {

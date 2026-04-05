@@ -42,6 +42,13 @@ type ChunkMetadataRecord = {
   storageStatus: string;
   originStart: string | null;
   originEnd: string | null;
+  lang: 'zh' | 'en';
+  title: string | null;
+  hierarchy: string[];
+  level: number;
+  nodeType: string;
+  pageStart: number | null;
+  pageEnd: number | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -103,6 +110,13 @@ function mapChunk(row: any): ChunkMetadataRecord {
     storageStatus: row.storage_status,
     originStart: row.origin_start,
     originEnd: row.origin_end,
+    lang: row.lang === 'en' ? 'en' : 'zh',
+    title: row.title,
+    hierarchy: JSON.parse(row.hierarchy_json ?? '[]'),
+    level: Number(row.level ?? 1),
+    nodeType: row.node_type ?? 'body',
+    pageStart: row.page_start === null || row.page_start === undefined ? null : Number(row.page_start),
+    pageEnd: row.page_end === null || row.page_end === undefined ? null : Number(row.page_end),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -166,6 +180,13 @@ export async function createDocumentPipelineStore(db: Database) {
       storage_status TEXT NOT NULL,
       origin_start TEXT,
       origin_end TEXT,
+      lang TEXT NOT NULL DEFAULT 'zh',
+      title TEXT,
+      hierarchy_json TEXT NOT NULL DEFAULT '[]',
+      level INTEGER NOT NULL DEFAULT 1,
+      node_type TEXT NOT NULL DEFAULT 'body',
+      page_start INTEGER,
+      page_end INTEGER,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -181,6 +202,21 @@ export async function createDocumentPipelineStore(db: Database) {
       created_at TEXT NOT NULL
     );
   `);
+
+  const chunkColumns = await db.all<{ name: string }[]>('PRAGMA table_info(document_chunk_metadata)');
+  const chunkColumnNames = new Set((chunkColumns ?? []).map((col: any) => String(col.name)));
+  const safeAddColumn = async (name: string, ddl: string) => {
+    if (chunkColumnNames.has(name)) return;
+    await db.exec(`ALTER TABLE document_chunk_metadata ADD COLUMN ${ddl}`);
+  };
+
+  await safeAddColumn('lang', "lang TEXT NOT NULL DEFAULT 'zh'");
+  await safeAddColumn('title', 'title TEXT');
+  await safeAddColumn('hierarchy_json', "hierarchy_json TEXT NOT NULL DEFAULT '[]'");
+  await safeAddColumn('level', 'level INTEGER NOT NULL DEFAULT 1');
+  await safeAddColumn('node_type', "node_type TEXT NOT NULL DEFAULT 'body'");
+  await safeAddColumn('page_start', 'page_start INTEGER');
+  await safeAddColumn('page_end', 'page_end INTEGER');
 
   return {
     async upsertJob(record: DocumentJobRecord) {
@@ -315,8 +351,8 @@ export async function createDocumentPipelineStore(db: Database) {
             chunk_id, document_id, file_name, file_type, source_path, source_unit, source_label,
             chunk_index, token_count, char_count, overlap_token_count, quality_status, quality_note,
             cleaning_applied_json, embedding_model, vector_dimension, storage_status,
-            origin_start, origin_end, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            origin_start, origin_end, lang, title, hierarchy_json, level, node_type, page_start, page_end, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             record.chunkId,
             record.documentId,
@@ -337,6 +373,13 @@ export async function createDocumentPipelineStore(db: Database) {
             record.storageStatus,
             record.originStart,
             record.originEnd,
+            record.lang,
+            record.title,
+            JSON.stringify(record.hierarchy ?? []),
+            record.level,
+            record.nodeType,
+            record.pageStart,
+            record.pageEnd,
             record.createdAt,
             record.updatedAt,
           ],

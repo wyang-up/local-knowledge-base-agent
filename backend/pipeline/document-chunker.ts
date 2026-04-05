@@ -11,13 +11,20 @@ type ChunkDraft = {
   qualityNote?: string | null;
   retrievalEligible?: boolean;
   sectionLevel?: 1 | 2 | 3;
-  sectionType?: 'abstract' | 'preface' | 'toc' | 'appendix' | 'references' | 'ack' | 'body';
+  sectionType?: 'abstract' | 'preface' | 'intro' | 'toc' | 'appendix' | 'references' | 'ack' | 'chapter' | 'body';
+  lang?: 'zh' | 'en';
+  title?: string;
+  hierarchy?: string[];
+  nodeType?: 'abstract' | 'preface' | 'intro' | 'toc' | 'appendix' | 'ref' | 'ack' | 'chapter' | 'body';
+  pageStart?: number | null;
+  pageEnd?: number | null;
 };
 
 type Section = {
   heading: string;
   level: 1 | 2 | 3;
   type: ChunkDraft['sectionType'];
+  hierarchy: string[];
   lines: string[];
 };
 
@@ -28,6 +35,14 @@ const OVERSIZE_TOKEN_THRESHOLD = 1200;
 
 function estimateTokens(text: string) {
   return Math.max(1, Math.ceil(text.length / 2));
+}
+
+function detectPrimaryLanguage(text: string): 'zh' | 'en' {
+  const normalized = normalizeText(text);
+  const zhCount = (normalized.match(/[\u4e00-\u9fff]/g) ?? []).length;
+  const enCount = (normalized.match(/[A-Za-z]/g) ?? []).length;
+  if (zhCount === 0 && enCount === 0) return 'zh';
+  return zhCount >= enCount ? 'zh' : 'en';
 }
 
 const HEADING_REGEXES = [
@@ -97,7 +112,7 @@ function detectHeadingLevel(text: string): 1 | 2 | 3 | null {
   const value = normalizeText(text);
   if (!value) return null;
 
-  if (/^(chapter\s+\d+|第[一二三四五六七八九十百千\d]+章|摘要|前言|目录|附录|参考文献|致谢|abstract|introduction|toc|appendix|references|acknowledg(e)?ment)$/i.test(value)) {
+  if (/^(chapter\s+\d+|第[一二三四五六七八九十百千\d]+章|摘要|前言|引言|目录|附录|参考文献|致谢|abstract|introduction|toc|appendix|references|acknowledg(e)?ment)$/i.test(value)) {
     return 1;
   }
   if (/^(section\s+\d+|第[一二三四五六七八九十百千\d]+节|\d+\.\d+\s+.+|[一二三四五六七八九十]+、.+|heading\s*2)$/i.test(value)) {
@@ -114,11 +129,30 @@ function detectSectionType(heading: string): ChunkDraft['sectionType'] {
   const text = normalizeText(heading).toLowerCase();
   if (/^(摘要|abstract)$/.test(text)) return 'abstract';
   if (/^(前言|introduction)$/.test(text)) return 'preface';
+  if (/^(引言|intro|introduction)$/.test(text)) return 'intro';
   if (/^(目录|toc)$/.test(text)) return 'toc';
   if (/^(附录|appendix)$/.test(text)) return 'appendix';
   if (/^(参考文献|references?)$/.test(text)) return 'references';
   if (/^(致谢|acknowledgment|acknowledgement)$/.test(text)) return 'ack';
+  if (/^(chapter\s+\d+|第[一二三四五六七八九十百千\d]+章)/i.test(text)) return 'chapter';
   return 'body';
+}
+
+function toNodeType(sectionType: ChunkDraft['sectionType']): ChunkDraft['nodeType'] {
+  switch (sectionType) {
+    case 'references':
+      return 'ref';
+    case 'abstract':
+    case 'preface':
+    case 'intro':
+    case 'toc':
+    case 'appendix':
+    case 'ack':
+    case 'chapter':
+      return sectionType;
+    default:
+      return 'body';
+  }
 }
 
 function toSections(cleaned: CleanedDocument) {
@@ -130,14 +164,20 @@ function toSections(cleaned: CleanedDocument) {
 
   const sections: Section[] = [];
   let current: Section | null = null;
+  const headingStack: Array<{ level: 1 | 2 | 3; heading: string }> = [];
 
   for (const line of lines) {
     const level = detectHeadingLevel(line);
     if (level) {
+      while (headingStack.length > 0 && headingStack[headingStack.length - 1]!.level >= level) {
+        headingStack.pop();
+      }
+      headingStack.push({ level, heading: line });
       current = {
         heading: line,
         level,
         type: detectSectionType(line),
+        hierarchy: headingStack.map((item) => item.heading),
         lines: [],
       };
       sections.push(current);
@@ -149,6 +189,7 @@ function toSections(cleaned: CleanedDocument) {
         heading: '正文',
         level: 1,
         type: 'body',
+        hierarchy: ['正文'],
         lines: [],
       };
       sections.push(current);
@@ -159,6 +200,85 @@ function toSections(cleaned: CleanedDocument) {
   return sections;
 }
 
+function isReferenceEntryStart(line: string) {
+  const value = normalizeWhitespace(line);
+  if (!value) return false;
+  if (/^(\[\d+\]|\d+[.)]|\(\d+\)|（\d+）|[•*-]\s+)/.test(value)) return true;
+  if (/^[A-Z][A-Za-z\-\s.,&]{2,80}\(\d{4}[a-z]?\)/.test(value)) return true;
+  return false;
+}
+
+function splitReferenceEntries(lines: string[]) {
+  const entries: string[] = [];
+  let current = '';
+
+  for (const rawLine of lines) {
+    const line = normalizeWhitespace(rawLine);
+    if (!line) continue;
+
+    if (current && isReferenceEntryStart(line)) {
+      entries.push(current.trim());
+      current = line;
+      continue;
+    }
+
+    current = current ? `${current} ${line}` : line;
+  }
+
+  if (current) entries.push(current.trim());
+  if (entries.length > 0) return entries;
+
+  const fallback = normalizeWhitespace(lines.join(' '));
+  return fallback ? [fallback] : [];
+}
+
+function chunkReferencesByEntries(section: Section, lang: 'zh' | 'en'): ChunkDraft[] {
+  const headingLine = headingPrefix(1, section.heading);
+  const entries = splitReferenceEntries(section.lines);
+  if (entries.length === 0) {
+    return [{
+      sourceUnit: 'body',
+      sourceLabel: section.heading,
+      content: headingLine,
+      tokenCount: estimateTokens(headingLine),
+      overlapTokenCount: 0,
+      qualityStatus: 'passed',
+      qualityNote: 'references_entry_chunk',
+      retrievalEligible: true,
+      sectionLevel: 1,
+      sectionType: 'references',
+      lang,
+      title: section.heading,
+      hierarchy: section.hierarchy,
+      nodeType: 'ref',
+      pageStart: null,
+      pageEnd: null,
+    }];
+  }
+
+  return entries.map((entry) => {
+    const content = `${headingLine}\n\n${entry}`;
+    return {
+      sourceUnit: 'body' as const,
+      sourceLabel: section.heading,
+      content,
+      tokenCount: estimateTokens(content),
+      overlapTokenCount: 0,
+      qualityStatus: 'passed' as const,
+      qualityNote: 'references_entry_chunk',
+      retrievalEligible: true,
+      sectionLevel: 1 as const,
+      sectionType: 'references' as const,
+      lang,
+      title: section.heading,
+      hierarchy: section.hierarchy,
+      nodeType: 'ref' as const,
+      pageStart: null,
+      pageEnd: null,
+    };
+  });
+}
+
 function chunkSectionBySentences(input: {
   section: Section;
   minToken: number;
@@ -166,6 +286,7 @@ function chunkSectionBySentences(input: {
   overlapToken: number;
   qualityNote: string;
   retrievalEligible: boolean;
+  lang: 'zh' | 'en';
 }): ChunkDraft[] {
   const bodyText = input.section.lines.join(' ');
   const headingLine = headingPrefix(input.section.level, input.section.heading);
@@ -182,6 +303,12 @@ function chunkSectionBySentences(input: {
       retrievalEligible: input.retrievalEligible,
       sectionLevel: input.section.level,
       sectionType: input.section.type,
+      lang: input.lang,
+      title: input.section.heading,
+      hierarchy: input.section.hierarchy,
+      nodeType: toNodeType(input.section.type),
+      pageStart: null,
+      pageEnd: null,
     }];
   }
 
@@ -206,6 +333,12 @@ function chunkSectionBySentences(input: {
       retrievalEligible: input.retrievalEligible,
       sectionLevel: input.section.level,
       sectionType: input.section.type,
+      lang: input.lang,
+      title: input.section.heading,
+      hierarchy: input.section.hierarchy,
+      nodeType: toNodeType(input.section.type),
+      pageStart: null,
+      pageEnd: null,
     });
     firstChunk = false;
     overlapFromPrevious = 0;
@@ -231,6 +364,7 @@ function chunkSectionBySentences(input: {
 }
 
 function chunkPdfDocx(cleaned: CleanedDocument): ChunkDraft[] {
+  const documentLang = detectPrimaryLanguage(cleaned.text);
   const totalTokens = estimateTokens(cleaned.text);
   if (totalTokens <= SMALL_DOC_TOKEN_THRESHOLD) {
     return [{
@@ -244,6 +378,12 @@ function chunkPdfDocx(cleaned: CleanedDocument): ChunkDraft[] {
       retrievalEligible: true,
       sectionLevel: 1,
       sectionType: 'body',
+      lang: documentLang,
+      title: cleaned.fileName,
+      hierarchy: [cleaned.fileName],
+      nodeType: 'body',
+      pageStart: null,
+      pageEnd: null,
     }];
   }
 
@@ -251,7 +391,7 @@ function chunkPdfDocx(cleaned: CleanedDocument): ChunkDraft[] {
   const chunks: ChunkDraft[] = [];
 
   for (const section of sections) {
-    if (section.type === 'abstract' || section.type === 'preface' || section.type === 'ack') {
+    if (section.type === 'abstract' || section.type === 'preface' || section.type === 'ack' || section.type === 'appendix') {
       const headingLine = headingPrefix(1, section.heading);
       const body = section.lines.join(' ').trim();
       const content = body ? `${headingLine}\n\n${body}` : headingLine;
@@ -262,10 +402,16 @@ function chunkPdfDocx(cleaned: CleanedDocument): ChunkDraft[] {
         tokenCount: estimateTokens(content),
         overlapTokenCount: 0,
         qualityStatus: 'passed',
-        qualityNote: 'front_back_section_single_chunk',
+        qualityNote: section.type === 'appendix' ? 'appendix_single_chunk' : 'front_back_section_single_chunk',
         retrievalEligible: true,
         sectionLevel: 1,
         sectionType: section.type,
+        lang: detectPrimaryLanguage(content),
+        title: section.heading,
+        hierarchy: section.hierarchy,
+        nodeType: toNodeType(section.type),
+        pageStart: null,
+        pageEnd: null,
       });
       continue;
     }
@@ -285,19 +431,18 @@ function chunkPdfDocx(cleaned: CleanedDocument): ChunkDraft[] {
         retrievalEligible: false,
         sectionLevel: 1,
         sectionType: 'toc',
+        lang: detectPrimaryLanguage(content),
+        title: section.heading,
+        hierarchy: section.hierarchy,
+        nodeType: 'toc',
+        pageStart: null,
+        pageEnd: null,
       });
       continue;
     }
 
-    if (section.type === 'appendix' || section.type === 'references') {
-      chunks.push(...chunkSectionBySentences({
-        section: { ...section, level: 1 },
-        minToken: 600,
-        maxToken: 800,
-        overlapToken: 40,
-        qualityNote: 'appendix_references_semantic_chunk',
-        retrievalEligible: true,
-      }));
+    if (section.type === 'references') {
+      chunks.push(...chunkReferencesByEntries({ ...section, level: 1 }, detectPrimaryLanguage(section.lines.join(' '))));
       continue;
     }
 
@@ -309,6 +454,7 @@ function chunkPdfDocx(cleaned: CleanedDocument): ChunkDraft[] {
       overlapToken: boundaryOverlap,
       qualityNote: 'semantic_chunk_pdf_docx',
       retrievalEligible: true,
+      lang: detectPrimaryLanguage(section.lines.join(' ')),
     }));
   }
 
@@ -316,6 +462,7 @@ function chunkPdfDocx(cleaned: CleanedDocument): ChunkDraft[] {
 }
 
 function chunkTxt(cleaned: CleanedDocument): ChunkDraft[] {
+  const lang = detectPrimaryLanguage(cleaned.text);
   const totalTokens = estimateTokens(cleaned.text);
   if (totalTokens <= SMALL_DOC_TOKEN_THRESHOLD) {
     return [{
@@ -328,20 +475,28 @@ function chunkTxt(cleaned: CleanedDocument): ChunkDraft[] {
       qualityNote: 'small_text_single_chunk',
       retrievalEligible: true,
       sectionType: 'body',
+      lang,
+      title: cleaned.fileName,
+      hierarchy: [cleaned.fileName],
+      nodeType: 'body',
+      pageStart: null,
+      pageEnd: null,
     }];
   }
 
   return chunkSectionBySentences({
-    section: { heading: '正文', level: 1, type: 'body', lines: splitBySentences(cleaned.text) },
+    section: { heading: '正文', level: 1, type: 'body', hierarchy: ['正文'], lines: splitBySentences(cleaned.text) },
     minToken: 500,
     maxToken: 900,
     overlapToken: 80,
     qualityNote: 'semantic_chunk_txt',
     retrievalEligible: true,
+    lang,
   });
 }
 
 function chunkSheets(cleaned: CleanedDocument): ChunkDraft[] {
+  const lang = detectPrimaryLanguage(cleaned.text);
   const sheetUnits = cleaned.units.filter((unit) => unit.sourceUnit === 'sheet');
   if (sheetUnits.length === 0) {
     return [{
@@ -354,6 +509,12 @@ function chunkSheets(cleaned: CleanedDocument): ChunkDraft[] {
       qualityNote: 'sheet_fallback',
       retrievalEligible: true,
       sectionType: 'body',
+      lang,
+      title: cleaned.fileName,
+      hierarchy: [cleaned.fileName],
+      nodeType: 'body',
+      pageStart: null,
+      pageEnd: null,
     }];
   }
 
@@ -375,6 +536,12 @@ function chunkSheets(cleaned: CleanedDocument): ChunkDraft[] {
         qualityNote: 'small_sheet_single_chunk',
         retrievalEligible: true,
         sectionType: 'body',
+        lang,
+        title: sheet.sourceLabel ?? cleaned.fileName,
+        hierarchy: [sheet.sourceLabel ?? cleaned.fileName],
+        nodeType: 'body',
+        pageStart: null,
+        pageEnd: null,
       });
       continue;
     }
@@ -395,6 +562,12 @@ function chunkSheets(cleaned: CleanedDocument): ChunkDraft[] {
         qualityNote: 'sheet_semantic_rows',
         retrievalEligible: true,
         sectionType: 'body',
+        lang,
+        title: sheet.sourceLabel ?? cleaned.fileName,
+        hierarchy: [sheet.sourceLabel ?? cleaned.fileName],
+        nodeType: 'body',
+        pageStart: null,
+        pageEnd: null,
       });
     };
 
@@ -419,6 +592,7 @@ function chunkSheets(cleaned: CleanedDocument): ChunkDraft[] {
 }
 
 function chunkJson(cleaned: CleanedDocument): ChunkDraft[] {
+  const lang = detectPrimaryLanguage(cleaned.text);
   const totalTokens = estimateTokens(cleaned.text);
   if (totalTokens <= SMALL_DOC_TOKEN_THRESHOLD) {
     return [{
@@ -431,6 +605,12 @@ function chunkJson(cleaned: CleanedDocument): ChunkDraft[] {
       qualityNote: 'small_json_single_chunk',
       retrievalEligible: true,
       sectionType: 'body',
+      lang,
+      title: 'root',
+      hierarchy: ['root'],
+      nodeType: 'body',
+      pageStart: null,
+      pageEnd: null,
     }];
   }
 
@@ -446,6 +626,12 @@ function chunkJson(cleaned: CleanedDocument): ChunkDraft[] {
       qualityNote: 'json_fallback_root',
       retrievalEligible: true,
       sectionType: 'body',
+      lang,
+      title: 'root',
+      hierarchy: ['root'],
+      nodeType: 'body',
+      pageStart: null,
+      pageEnd: null,
     }];
   }
 
@@ -468,6 +654,12 @@ function chunkJson(cleaned: CleanedDocument): ChunkDraft[] {
       qualityNote: 'json_top_level_group',
       retrievalEligible: true,
       sectionType: 'body',
+      lang,
+      title: firstLabel ?? 'root',
+      hierarchy: [firstLabel ?? 'root'],
+      nodeType: 'body',
+      pageStart: null,
+      pageEnd: null,
     });
     entries = [];
     tokenCount = 0;
@@ -556,6 +748,7 @@ function filterInvalidChunks(chunks: ChunkDraft[]) {
 
 export function chunkDocument(cleaned: CleanedDocument): ChunkDraft[] {
   const fileType = cleaned.fileType.replace(/^\./, '').toLowerCase();
+  const lang = detectPrimaryLanguage(cleaned.text);
 
   if (fileType === 'pdf' || fileType === 'docx') return chunkPdfDocx(cleaned);
   if (fileType === 'txt') return chunkTxt(cleaned);
@@ -571,6 +764,12 @@ export function chunkDocument(cleaned: CleanedDocument): ChunkDraft[] {
     qualityStatus: 'passed',
     retrievalEligible: true,
     sectionType: 'body',
+    lang,
+    title: cleaned.fileName,
+    hierarchy: [cleaned.fileName],
+    nodeType: 'body',
+    pageStart: null,
+    pageEnd: null,
   }];
 }
 

@@ -6,6 +6,16 @@
 - 后端：Express API（默认 `http://localhost:8080`）
 - AI 服务：SiliconFlow（OpenAI 兼容接口，默认 `https://api.siliconflow.cn/v1`）
 
+## 当前版本对齐点（2026-04-05）
+
+- 文档详情页已升级为三栏联动：左侧目录树 / 中间分块卡片 / 右侧信息面板。
+- 左侧目录采用树形层级与单行标题规则（超过 18 字自动省略，hover 可看完整标题）。
+- 中栏文档标题 sticky 固定，分块内容在标题下方独立滚动。
+- 分块卡片头部展示结构化元信息：短章节名、Token、页码、语言。
+- 上传失败会在上传区就近展示错误提示（优先显示后端 `error`）。
+- 后端分块链路补齐树形元数据：`lang`、`title`、`hierarchy`、`level`、`nodeType`，API 对外补充 `node_type`。
+- `Appendix` 保持单块；`References` 按条目分块。
+
 ## 目录结构
 
 - `frontend/src/`：前端页面与交互
@@ -71,6 +81,12 @@ npm run dev
 这些请求会由 Vite dev server 自动代理到：
 
 - `http://localhost:8080`
+
+常用详情页相关接口（当前版本）：
+
+- `GET /api/documents/:id`：返回文档详情及分块列表（含 `lang/title/hierarchy/level/nodeType/node_type`）
+- `POST /api/documents/:id/rechunk`：触发从分块阶段重跑
+- `GET /api/documents/:id/chunks/export`：导出分块元数据 JSON
 
 这意味着开发时通常不需要手动写死后端地址，也能避免额外的跨域调试噪音。
 
@@ -181,6 +197,7 @@ npm run dev:backend
 - `AppShell.tsx`：顶栏 + 底部 Tab 框架层。
 - `DocumentListPanel.tsx`：文档列表页视图层（上传、预览、删除、重试、跳转详情）。
 - `DocumentDetailPanel.tsx`：文档详情页视图层（元信息、目录、分块展示）。
+- `DocumentDetailPanel.tsx`：文档详情页视图层（三栏布局、目录树联动、标题 sticky、分块卡片与右栏操作）。
 - `QAPagePanel.tsx`：问答页视图层（会话列表、消息区、输入区、状态栏）。
 - `SettingsPagePanel.tsx`：设置页视图层（UI、模型、存储卡片与确认弹窗）。
 - 对应 `*.test.tsx`：各面板组件回归测试。
@@ -221,6 +238,7 @@ npm run dev:backend
 - `document-parser.ts`：文档解析。
 - `document-cleaner.ts`：清洗文本。
 - `document-chunker.ts`：分块策略（中英混排、超大块拆分等）。
+- `document-chunker.ts`：分块策略（中英主语言识别、章节树元数据、Appendix 单块、References 条目分块）。
 - `document-embedding.ts`：向量化调用与批处理控制。
 - `document-storage-writer.ts`：向量与元数据写入。
 - `document-pipeline-runner.ts`：阶段执行与恢复控制。

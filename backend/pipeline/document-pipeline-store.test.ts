@@ -78,12 +78,29 @@ describe('document-pipeline-store', () => {
       storageStatus: 'pending',
       originStart: 'p1',
       originEnd: 'p2',
+      lang: 'zh',
+      title: '第一章',
+      hierarchy: ['第一章'],
+      level: 1,
+      nodeType: 'chapter',
+      pageStart: 1,
+      pageEnd: 2,
       createdAt: '2026-04-03T00:00:00.000Z',
       updatedAt: '2026-04-03T00:00:00.000Z',
     }]);
 
     expect(await store.listChunkMetadata('doc-1')).toMatchObject([
-      { sourceLabel: '第一章', storageStatus: 'pending' },
+      {
+        sourceLabel: '第一章',
+        storageStatus: 'pending',
+        lang: 'zh',
+        title: '第一章',
+        hierarchy: ['第一章'],
+        level: 1,
+        nodeType: 'chapter',
+        pageStart: 1,
+        pageEnd: 2,
+      },
     ]);
   });
 

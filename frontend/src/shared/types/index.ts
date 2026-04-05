@@ -19,6 +19,11 @@ export interface Document {
   message?: string | null;
   errorCode?: string | null;
   errorMessage?: string | null;
+  parseStatus?: 'processing' | 'completed' | 'failed';
+  vectorStatus?: 'processing' | 'completed' | 'failed';
+  chunkingStrategy?: string;
+  overlapLength?: number;
+  embeddingModel?: string;
 }
 
 export interface Chunk {
@@ -26,6 +31,16 @@ export interface Chunk {
   docId: string;
   content: string;
   index: number;
+  tokenCount?: number | null;
+  lang?: 'zh' | 'en';
+  title?: string | null;
+  hierarchy?: string[];
+  level?: number;
+  nodeType?: 'abstract' | 'preface' | 'intro' | 'chapter' | 'appendix' | 'ref' | 'toc' | 'ack' | 'body';
+  pageStart?: number | null;
+  pageEnd?: number | null;
+  overlapTokenCount?: number;
+  retrievalEligible?: boolean;
 }
 
 export interface MessageSource {

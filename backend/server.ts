@@ -681,6 +681,14 @@ async function startServer() {
     if (chunkTable) {
       chunks = await chunkTable.query().where(`docId = '${req.params.id}'`).toArray();
     }
+    const metadataRecords = await pipelineStore.listChunkMetadata(req.params.id);
+    const metadataByChunkId = new Map(metadataRecords.map((row: any) => [row.chunkId, row]));
+    const overlapLength = metadataRecords.length > 0
+      ? Math.round(metadataRecords.reduce((sum: number, row: any) => sum + Number(row.overlapTokenCount ?? 0), 0) / metadataRecords.length)
+      : 0;
+    const embeddingModel = metadataRecords.find((row: any) => row.embeddingModel)?.embeddingModel ?? DEFAULT_EMBEDDING_MODEL;
+    const vectorized = doc.status === 'completed' && (doc.chunkCount ?? 0) > 0;
+
     res.json({
       ...doc,
       currentStage: job?.currentStage ?? null,
@@ -695,7 +703,48 @@ async function startServer() {
       message: job?.message ?? null,
       errorCode: job?.errorCode ?? null,
       errorMessage: job?.errorMessage ?? null,
-      chunks: chunks.map((chunk: any) => ({ id: chunk.id, content: chunk.content, index: chunk.chunkIndex })),
+      parseStatus: doc.status === 'failed' ? 'failed' : (doc.status === 'processing' ? 'processing' : 'completed'),
+      vectorStatus: vectorized ? 'completed' : (doc.status === 'failed' ? 'failed' : 'processing'),
+      chunkingStrategy: 'sentence-window + quality-check',
+      overlapLength,
+      embeddingModel,
+      chunks: chunks.map((chunk: any) => {
+        const metadata = metadataByChunkId.get(chunk.id) ?? null;
+        const resolvedNodeType = metadata?.nodeType ?? chunk.nodeType ?? chunk.sectionType ?? 'body';
+        return {
+          id: chunk.id,
+          content: chunk.content,
+          index: chunk.chunkIndex,
+          tokenCount: metadata?.tokenCount ?? chunk.tokenCount ?? null,
+          lang: metadata?.lang ?? chunk.lang ?? 'zh',
+          title: metadata?.title ?? chunk.title ?? chunk.sourceLabel ?? null,
+          hierarchy: metadata?.hierarchy ?? chunk.hierarchy ?? [],
+          level: metadata?.level ?? chunk.level ?? chunk.sectionLevel ?? 1,
+          nodeType: resolvedNodeType,
+          node_type: resolvedNodeType,
+          pageStart: metadata?.pageStart ?? chunk.pageStart ?? null,
+          pageEnd: metadata?.pageEnd ?? chunk.pageEnd ?? null,
+          overlapTokenCount: metadata?.overlapTokenCount ?? chunk.overlapTokenCount ?? 0,
+          retrievalEligible: metadata?.retrievalEligible ?? chunk.retrievalEligible ?? true,
+        };
+      }),
+    });
+  });
+
+  app.get('/api/documents/:id/chunks/export', async (req, res) => {
+    const doc = await db.get('SELECT * FROM documents WHERE id = ?', req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+    const metadata = await pipelineStore.listChunkMetadata(req.params.id);
+    res.json({
+      documentId: req.params.id,
+      fileName: doc.name,
+      exportedAt: new Date().toISOString(),
+      chunkCount: metadata.length,
+      chunks: metadata.map((item: any) => ({
+        ...item,
+        node_type: item.nodeType ?? item.node_type ?? 'body',
+      })),
     });
   });
 
@@ -818,6 +867,23 @@ async function startServer() {
     });
     executeDocumentPipeline(doc, doc.filePath, retryStage).catch(console.error);
     res.json({ ok: true, retryStage });
+  });
+
+  app.post('/api/documents/:id/rechunk', async (req, res) => {
+    const doc = await db.get('SELECT * FROM documents WHERE id = ?', req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    await writeDocumentStage(req.params.id, 'chunking', {
+      jobStatus: 'running',
+      message: 'rechunk requested',
+      errorCode: null,
+      errorMessage: null,
+      stageProgress: 0,
+      overallProgress: 35,
+      lastSuccessfulStage: 'cleaning',
+      retryCount: 0,
+    });
+    executeDocumentPipeline(doc, doc.filePath, 'chunking').catch(console.error);
+    res.json({ ok: true, stage: 'chunking' });
   });
 
   app.post('/api/documents/:id/cancel', async (req, res) => {
