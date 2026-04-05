@@ -1,18 +1,8 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest';
-import * as documentChunker from './document-chunker.ts';
+import { chunkDocument, qualityCheckChunks, splitSentencesForTest } from './document-chunker.ts';
 import type { CleanedDocument } from './document-cleaner.ts';
-
-const { chunkDocument, qualityCheckChunks } = documentChunker;
-
-function splitSentencesForTest(text: string) {
-  const candidate = (documentChunker as { splitSentencesForTest?: (input: string) => string[] }).splitSentencesForTest;
-  if (typeof candidate !== 'function') {
-    throw new Error('splitSentencesForTest is not implemented');
-  }
-  return candidate(text);
-}
 
 function buildChunkedCleanedDocument(overrides: Partial<CleanedDocument> = {}): CleanedDocument {
   return {
@@ -165,7 +155,43 @@ describe('document-chunker', () => {
 });
 
 describe('english sentence boundary contracts (RED)', () => {
-  it('keeps multi-dot abbreviations and titles while splitting into exact 5 sentences', () => {
+  it('keeps e.g./i.e. inside one sentence', () => {
+    const text = 'We use e.g. transformers and i.e. attention blocks. Another line starts.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'We use e.g. transformers and i.e. attention blocks.',
+      'Another line starts.',
+    ]);
+  });
+
+  it('keeps Dr. title attached to person name sentence', () => {
+    const text = 'Dr. Smith arrived. Next topic.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'Dr. Smith arrived.',
+      'Next topic.',
+    ]);
+  });
+
+  it('does not split when U.S. appears in sentence middle', () => {
+    const text = 'He lived in the U.S. market for years. Another line starts.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'He lived in the U.S. market for years.',
+      'Another line starts.',
+    ]);
+  });
+
+  it('splits when U.S. appears at sentence end', () => {
+    const text = 'He moved to the U.S. Another line starts.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'He moved to the U.S.',
+      'Another line starts.',
+    ]);
+  });
+
+  it('keeps multi-dot + title contract as exact 5 sentences', () => {
     const text = 'We use e.g. transformers and i.e. attention blocks. Dr. Smith arrived. He lived in the U.S. market for years. He moved to the U.S. Another line starts.';
 
     expect(splitSentencesForTest(text)).toEqual([
@@ -195,15 +221,6 @@ describe('english sentence boundary contracts (RED)', () => {
       'This is enough, etc.',
       'Another sentence.',
       'See No. 12 and Fig. 3 for proof.',
-    ]);
-  });
-
-  it('counterexample: still splits normal boundary after title abbreviation', () => {
-    const text = 'Dr. Smith arrived. Next topic.';
-
-    expect(splitSentencesForTest(text)).toEqual([
-      'Dr. Smith arrived.',
-      'Next topic.',
     ]);
   });
 });

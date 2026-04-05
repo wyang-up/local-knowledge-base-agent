@@ -243,4 +243,8 @@ export function qualityCheckChunks(chunks: ChunkDraft[]): ChunkDraft[] {
   });
 }
 
+export function splitSentencesForTest(_text: string): string[] {
+  throw new Error('splitSentencesForTest is not implemented');
+}
+
 export type { ChunkDraft };
