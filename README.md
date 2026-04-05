@@ -85,8 +85,24 @@ npm run dev
 常用详情页相关接口（当前版本）：
 
 - `GET /api/documents/:id`：返回文档详情及分块列表（含 `lang/title/hierarchy/level/nodeType/node_type`）
+- `GET /api/documents/:id/content`：返回文档预览原始内容，支持 `Range: bytes=start-end`，状态码为 `200`（全量）/`206`（分片）/`416`（Range 非法）
+  - `206` 响应头包含 `Accept-Ranges: bytes`、`Content-Range`、`Content-Length`
+  - `416` 响应头包含 `Content-Range: bytes */<total>`
+  - 错误统一为 JSON：`{ "ok": false, "error": { "code", "message", "retriable", "details?" } }`
 - `POST /api/documents/:id/rechunk`：触发从分块阶段重跑
 - `GET /api/documents/:id/chunks/export`：导出分块元数据 JSON
+- `GET /api/settings/preview-flags`：返回预览运行时开关
+  - `enableNewPreviewModal`：全局开关（默认 `true`，控制是否启用新预览弹窗）
+  - `enableNewPreviewByType`：按类型开关（`pdf/table/json/text`），用于细粒度灰度
+
+### 文档预览开关与回退关系
+
+- 新预览采用「全局开关 + 按类型开关」双层判定，只有两层都通过才进入新预览渲染。
+- 任一开关关闭时，前端自动回退到 legacy 预览路径，不影响原有预览可用性。
+- 后端内容接口 `GET /api/documents/:id/content` 为新预览提供底层内容读取能力，不改变 legacy 路由。
+- 运行时环境变量：
+  - `ENABLE_NEW_PREVIEW_MODAL`：全局开关，支持 `true/false/on/off/1/0`（默认开启）
+  - `ENABLE_NEW_PREVIEW_BY_TYPE`：按类型开关，格式示例 `pdf:true,table:true,json:false,text:true`
 
 这意味着开发时通常不需要手动写死后端地址，也能避免额外的跨域调试噪音。
 

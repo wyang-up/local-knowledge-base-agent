@@ -3,6 +3,10 @@ import {format} from 'date-fns';
 import {CheckCircle2, CircleX, Eye, File, FileSpreadsheet, Folder, Loader2, Trash2, UploadCloud} from 'lucide-react';
 import {cn} from '../../../shared/lib/utils';
 import type {Chunk, Document} from '../../../shared/types';
+import {DocumentPreviewContent} from './preview/DocumentPreviewContent';
+import {LegacyChunkPreviewModal} from './preview/LegacyChunkPreviewModal';
+import {PreviewModal} from './preview/PreviewModal';
+import {useDocumentPreviewResource} from './preview/useDocumentPreviewResource';
 
 export type DocumentListLocale = {
   uploadDoc: string;
@@ -31,9 +35,80 @@ export type DocumentListLocale = {
   previewMoreChunks: string;
   openDetails: string;
   close: string;
+  previewLocateChunk: string;
+  previewDownloadAction: string;
+  previewCloseAriaLabel: string;
+  previewLoadError: string;
+  previewLoading: string;
+  previewLegacyFallback: string;
   uploadExists: string;
   deleteDocConfirm: string;
 };
+
+type PreviewFlags = {
+  enableNewPreviewModal: boolean;
+  enableNewPreviewByType: Record<string, boolean>;
+};
+
+const DEFAULT_PREVIEW_FLAGS: PreviewFlags = {
+  enableNewPreviewModal: true,
+  enableNewPreviewByType: {},
+};
+
+const SAFE_FALLBACK_PREVIEW_FLAGS: PreviewFlags = {
+  enableNewPreviewModal: false,
+  enableNewPreviewByType: {},
+};
+
+function toTypeKey(docType: string | null | undefined): string {
+  return (docType || '').trim().toLowerCase().replace(/^\./, '');
+}
+
+function parsePreviewFlags(payload: unknown): PreviewFlags {
+  if (!payload || typeof payload !== 'object') {
+    return DEFAULT_PREVIEW_FLAGS;
+  }
+
+  const input = payload as {
+    enableNewPreviewModal?: unknown;
+    enableNewPreviewByType?: unknown;
+  };
+
+  const rawByType = input.enableNewPreviewByType;
+  const enableNewPreviewByType: Record<string, boolean> = {};
+  if (rawByType && typeof rawByType === 'object') {
+    for (const [key, value] of Object.entries(rawByType as Record<string, unknown>)) {
+      if (typeof value === 'boolean') {
+        enableNewPreviewByType[key.trim().toLowerCase()] = value;
+      }
+    }
+  }
+
+  return {
+    enableNewPreviewModal: input.enableNewPreviewModal !== false,
+    enableNewPreviewByType,
+  };
+}
+
+function shouldUseLegacyPreview(docType: string | null | undefined, flags: PreviewFlags): boolean {
+  if (!flags.enableNewPreviewModal) {
+    return true;
+  }
+
+  const rawType = (docType || '').trim().toLowerCase();
+  const normalizedType = toTypeKey(docType);
+  const byType = flags.enableNewPreviewByType;
+
+  if (rawType && byType[rawType] === false) {
+    return true;
+  }
+
+  if (normalizedType && byType[normalizedType] === false) {
+    return true;
+  }
+
+  return false;
+}
 
 type DocumentListPanelProps = {
   isDarkTheme: boolean;
@@ -47,10 +122,20 @@ export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpen
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
-  const [previewDoc, setPreviewDoc] = useState<Document | null>(null);
-  const [previewChunks, setPreviewChunks] = useState<Chunk[]>([]);
+  const [previewFlags, setPreviewFlags] = useState<PreviewFlags>(DEFAULT_PREVIEW_FLAGS);
+  const [newPreviewDoc, setNewPreviewDoc] = useState<Document | null>(null);
+  const [legacyPreviewDoc, setLegacyPreviewDoc] = useState<Document | null>(null);
+  const [legacyPreviewChunks, setLegacyPreviewChunks] = useState<Chunk[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<HTMLDivElement>(null);
+  const legacyPreviewRequestVersionRef = useRef(0);
+
+  const previewResourceState = useDocumentPreviewResource({
+    apiUrl,
+    documentId: newPreviewDoc?.id,
+    documentType: newPreviewDoc?.type,
+    enabled: Boolean(newPreviewDoc),
+  });
 
   const fetchDocs = async () => {
     try {
@@ -67,6 +152,67 @@ export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpen
     const interval = setInterval(fetchDocs, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetch(apiUrl('/api/settings/preview-flags'))
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`preview-flags request failed: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then((data: unknown) => {
+        if (active) {
+          setPreviewFlags(parsePreviewFlags(data));
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setPreviewFlags(SAFE_FALLBACK_PREVIEW_FLAGS);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [apiUrl]);
+
+  const openLegacyPreview = async (doc: Document) => {
+    legacyPreviewRequestVersionRef.current += 1;
+    const requestVersion = legacyPreviewRequestVersionRef.current;
+
+    try {
+      const res = await fetch(apiUrl(`/api/documents/${doc.id}`));
+      const data = await res.json();
+
+      if (requestVersion !== legacyPreviewRequestVersionRef.current) {
+        return;
+      }
+
+      setNewPreviewDoc(null);
+      setLegacyPreviewDoc(doc);
+      setLegacyPreviewChunks(Array.isArray(data?.chunks) ? data.chunks : []);
+    } catch (e) {
+      console.error(e);
+
+      if (requestVersion !== legacyPreviewRequestVersionRef.current) {
+        return;
+      }
+
+      setNewPreviewDoc(null);
+      setLegacyPreviewDoc(doc);
+      setLegacyPreviewChunks([]);
+    }
+  };
+
+  useEffect(() => {
+    if (!newPreviewDoc || !previewResourceState.error) {
+      return;
+    }
+
+    void openLegacyPreview(newPreviewDoc);
+  }, [newPreviewDoc, previewResourceState.error]);
 
   const handleUpload = async (file: File) => {
     setIsUploading(true);
@@ -108,14 +254,25 @@ export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpen
   };
 
   const handlePreview = async (doc: Document) => {
-    try {
-      const res = await fetch(apiUrl(`/api/documents/${doc.id}`));
-      const data = await res.json();
-      setPreviewDoc(doc);
-      setPreviewChunks(data.chunks || []);
-    } catch (e) {
-      console.error(e);
+    if (!shouldUseLegacyPreview(doc.type, previewFlags)) {
+      legacyPreviewRequestVersionRef.current += 1;
+      setLegacyPreviewDoc(null);
+      setLegacyPreviewChunks([]);
+      setNewPreviewDoc(doc);
+      return;
     }
+
+    await openLegacyPreview(doc);
+  };
+
+  const closeNewPreview = () => {
+    setNewPreviewDoc(null);
+  };
+
+  const closeLegacyPreview = () => {
+    legacyPreviewRequestVersionRef.current += 1;
+    setLegacyPreviewDoc(null);
+    setLegacyPreviewChunks([]);
   };
 
   return (
@@ -268,40 +425,62 @@ export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpen
         </div>
       </div>
 
-      {previewDoc && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPreviewDoc(null)}>
-          <div data-testid="preview-modal-surface" className={cn('rounded-xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col', isDarkTheme ? 'bg-slate-900 border border-slate-700' : 'bg-white')} onClick={(e) => e.stopPropagation()}>
-            <div className={cn('p-4 border-b flex items-center justify-between shrink-0', isDarkTheme ? 'border-slate-700' : 'border-gray-200')}>
-              <h3 className={cn('font-bold', isDarkTheme ? 'text-slate-100' : 'text-gray-800')}>{locale.previewTitle} - {previewDoc.name}</h3>
-              <button type="button" onClick={() => setPreviewDoc(null)} className={cn('p-1 rounded', isDarkTheme ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-gray-100 text-gray-500')} aria-label={locale.close}>✕</button>
-            </div>
-            <div className="p-4 overflow-y-auto flex-1">
-              <div className={cn('mb-4 text-sm flex gap-4', isDarkTheme ? 'text-slate-300' : 'text-gray-500')}>
-                <span>{locale.previewMetaSize}: {(previewDoc.size / 1024 / 1024).toFixed(2)} MB</span>
-                <span>{locale.previewMetaType}: {previewDoc.type}</span>
-                <span>{locale.previewMetaChunks}: {previewChunks.length}</span>
-              </div>
-              <div className="space-y-3">
-                {previewChunks.length > 0 ? previewChunks.slice(0, 5).map((chunk, i) => (
-                  <div key={i} className={cn('border rounded-lg p-3', isDarkTheme ? 'border-slate-700 bg-slate-800/70' : 'border-gray-200 bg-gray-50/50')}>
-                    <span className={cn('text-xs font-bold px-2 py-0.5 rounded', isDarkTheme ? 'text-sky-200 bg-sky-900/50' : 'text-blue-600 bg-blue-100')}>#{(chunk.index || 0) + 1}</span>
-                    <p className={cn('text-sm mt-2 line-clamp-3 leading-relaxed', isDarkTheme ? 'text-slate-100' : 'text-gray-600')}>{chunk.content}</p>
-                  </div>
-                )) : (
-                  <p className={cn('text-center py-6', isDarkTheme ? 'text-slate-400' : 'text-gray-400')}>{locale.previewNoChunks}</p>
-                )}
-                {previewChunks.length > 5 && (
-                  <p className={cn('text-center text-sm', isDarkTheme ? 'text-slate-400' : 'text-gray-400')}>{language === 'en' ? `${previewChunks.length - 5} ${locale.previewMoreChunks}` : `还有 ${previewChunks.length - 5} ${locale.previewMoreChunks}`}</p>
-                )}
-              </div>
-            </div>
-            <div className={cn('p-4 border-t flex justify-end gap-2 shrink-0', isDarkTheme ? 'border-slate-700' : 'border-gray-200')}>
-              <button type="button" onClick={() => { setPreviewDoc(null); onOpenDetail(previewDoc); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">{locale.openDetails}</button>
-              <button type="button" onClick={() => setPreviewDoc(null)} className={cn('px-4 py-2 rounded-lg text-sm font-medium transition-colors', isDarkTheme ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-gray-100 hover:bg-gray-200')}>{locale.close}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <PreviewModal
+        open={Boolean(newPreviewDoc)}
+        fileName={newPreviewDoc?.name ?? '-'}
+        size={newPreviewDoc?.size ?? null}
+        type={newPreviewDoc?.type ?? null}
+        uploadTime={newPreviewDoc?.uploadTime ?? null}
+        chunkCount={newPreviewDoc?.chunkCount ?? null}
+        onClose={closeNewPreview}
+        onViewDetails={newPreviewDoc
+          ? () => {
+            closeNewPreview();
+            onOpenDetail(newPreviewDoc);
+          }
+          : undefined}
+        onLocateChunk={newPreviewDoc
+          ? () => {
+            closeNewPreview();
+            onOpenDetail(newPreviewDoc);
+          }
+          : undefined}
+        labels={{
+          viewDetails: locale.openDetails,
+          download: locale.previewDownloadAction,
+          close: locale.close,
+          closeAriaLabel: locale.previewCloseAriaLabel,
+          locateChunk: locale.previewLocateChunk,
+          metaSize: locale.previewMetaSize,
+          metaType: locale.previewMetaType,
+          metaUploadTime: locale.colUploadTime,
+          metaChunkCount: locale.previewMetaChunks,
+        }}
+      >
+        <DocumentPreviewContent
+          mimeType={previewResourceState.resource?.mimeType ?? null}
+          fileName={newPreviewDoc?.name ?? null}
+          extension={newPreviewDoc?.type ?? null}
+          fallbackType={newPreviewDoc?.type ?? null}
+          resource={previewResourceState.resource}
+          loading={previewResourceState.loading}
+          error={previewResourceState.error}
+          fallbackLabel={locale.previewLegacyFallback}
+          loadingLabel={locale.previewLoading}
+          errorLabel={locale.previewLoadError}
+        />
+      </PreviewModal>
+
+      <LegacyChunkPreviewModal
+        open={Boolean(legacyPreviewDoc)}
+        isDarkTheme={isDarkTheme}
+        language={language}
+        locale={locale}
+        document={legacyPreviewDoc}
+        chunks={legacyPreviewChunks}
+        onClose={closeLegacyPreview}
+        onOpenDetails={onOpenDetail}
+      />
     </div>
   );
 }
