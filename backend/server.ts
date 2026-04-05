@@ -31,7 +31,6 @@ import { createDocumentPipelineRunner } from './pipeline/document-pipeline-runne
 import { buildChunkMetadataRecords, buildEmbeddingInputs, buildFailureRecoveryInput, resolvePipelineErrorCode } from './pipeline/document-pipeline-helpers.ts';
 import { createDocumentPipelineStages } from './pipeline/document-pipeline-stages.ts';
 import { resolveResumeStage, type DocumentJobRecord, type PipelineStage } from './pipeline/document-pipeline-types.ts';
-import { isEnglishBoundaryProtectionEnabled } from './pipeline/document-sentence-splitter.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -199,6 +198,16 @@ function debugStartup(...args: unknown[]) {
   if (DEBUG_STARTUP) {
     console.log('[startup]', ...args);
   }
+}
+
+function isEnglishBoundaryProtectionEnabledForStartupLog() {
+  const raw = process.env.ENABLE_ENGLISH_BOUNDARY_PROTECTION;
+  if (raw === undefined) {
+    return true;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  return normalized !== '0' && normalized !== 'false' && normalized !== 'off';
 }
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -1016,7 +1025,7 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Backend running at http://localhost:${PORT}`);
-    console.log(`english_boundary_protection=${isEnglishBoundaryProtectionEnabled() ? 'enabled' : 'disabled'}`);
+    console.log(`english_boundary_protection=${isEnglishBoundaryProtectionEnabledForStartupLog() ? 'enabled' : 'disabled'}`);
   });
 }
 
