@@ -262,7 +262,13 @@ function splitByLegacyBoundary(text: string) {
 }
 
 function isEnglishBoundaryProtectionEnabled() {
-  return process.env.ENABLE_ENGLISH_BOUNDARY_PROTECTION !== '0';
+  const raw = process.env.ENABLE_ENGLISH_BOUNDARY_PROTECTION;
+  if (raw === undefined) {
+    return true;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  return normalized !== '0' && normalized !== 'false' && normalized !== 'off';
 }
 
 export function splitSentencesByBoundary(text: string): string[] {

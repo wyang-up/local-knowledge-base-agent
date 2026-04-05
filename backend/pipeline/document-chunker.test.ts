@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { chunkDocument, qualityCheckChunks } from './document-chunker.ts';
 import { splitSentencesForTest } from './document-chunker.test-helper.ts';
+import { protectEnglishBoundaries, restoreProtectedTokens } from './document-sentence-splitter.ts';
 import type { CleanedDocument } from './document-cleaner.ts';
 
 function buildChunkedCleanedDocument(overrides: Partial<CleanedDocument> = {}): CleanedDocument {
@@ -362,5 +363,52 @@ describe('english sentence boundary contracts (RED)', () => {
       'Literal __EB_DOT__ stays here.',
       'Literal __EB_END__ stays too.',
     ]);
+  });
+
+  it('is character-level reversible for protect then restore', () => {
+    const text = 'Dr. Smith moved to the U.S. "Another line." Ph.D. holder saw No. 12.';
+    const protectedResult = protectEnglishBoundaries(text);
+
+    expect(restoreProtectedTokens(protectedResult.text, protectedResult.tokens)).toBe(text);
+  });
+
+  it('is idempotent across repeated protect and restore cycles', () => {
+    const text = 'Ms. Green earned a Ph.D. degree in the U.S. market.';
+    const first = protectEnglishBoundaries(text);
+    const once = restoreProtectedTokens(first.text, first.tokens);
+    const second = protectEnglishBoundaries(once);
+    const twice = restoreProtectedTokens(second.text, second.tokens);
+
+    expect(twice).toBe(once);
+    expect(twice).toBe(text);
+  });
+
+  it('matches legacy fixture literal when feature flag is false', () => {
+    const legacyFixture = [
+      'Dr.',
+      'Smith arrived.',
+      'He lived in the U.',
+      'S.',
+      'market for years.',
+    ];
+    const previous = process.env.ENABLE_ENGLISH_BOUNDARY_PROTECTION;
+    process.env.ENABLE_ENGLISH_BOUNDARY_PROTECTION = 'false';
+    try {
+      const text = 'Dr. Smith arrived. He lived in the U.S. market for years.';
+      expect(splitSentencesForTest(text)).toEqual(legacyFixture);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ENABLE_ENGLISH_BOUNDARY_PROTECTION;
+      } else {
+        process.env.ENABLE_ENGLISH_BOUNDARY_PROTECTION = previous;
+      }
+    }
+  });
+
+  it('does not pollute __DOT_*/__BND_* style literals during round trip', () => {
+    const text = 'Keep __DOT_abc__ and __BND_xyz__ literal. Dr. Smith moved to the U.S. market.';
+    const protectedResult = protectEnglishBoundaries(text);
+
+    expect(restoreProtectedTokens(protectedResult.text, protectedResult.tokens)).toBe(text);
   });
 });
