@@ -46,6 +46,7 @@ type DocumentListPanelProps = {
 export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpenDetail}: DocumentListPanelProps) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const [previewDoc, setPreviewDoc] = useState<Document | null>(null);
   const [previewChunks, setPreviewChunks] = useState<Chunk[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -69,15 +70,22 @@ export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpen
 
   const handleUpload = async (file: File) => {
     setIsUploading(true);
+    setUploadError('');
     const formData = new FormData();
     formData.append('file', file);
     try {
       const res = await fetch(apiUrl('/api/upload'), {method: 'POST', body: formData});
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const fallbackMessage = language === 'zh' ? '上传失败，请稍后重试' : 'Upload failed. Please try again.';
+        setUploadError(typeof data?.error === 'string' && data.error.trim() ? data.error : fallbackMessage);
+        return;
+      }
       if (data.status === 'exists') alert(locale.uploadExists);
       fetchDocs();
     } catch (e) {
       console.error(e);
+      setUploadError(language === 'zh' ? '上传失败，请稍后重试' : 'Upload failed. Please try again.');
     } finally {
       setIsUploading(false);
     }
@@ -114,6 +122,17 @@ export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpen
     <div className={`flex-1 flex flex-col p-6 overflow-hidden ${isDarkTheme ? 'bg-slate-950' : 'bg-gray-50'}`}>
       <div className={`max-w-6xl w-full mx-auto flex-1 flex flex-col rounded-xl shadow-sm border overflow-hidden ${isDarkTheme ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'}`}>
         <div className={`p-6 border-b flex flex-col gap-4 shrink-0 ${isDarkTheme ? 'border-slate-800' : 'border-gray-100'}`}>
+          {uploadError && (
+            <div
+              role="alert"
+              className={cn(
+                'px-3 py-2 text-sm rounded-lg border',
+                isDarkTheme ? 'bg-red-900/40 border-red-700 text-red-200' : 'bg-red-50 border-red-200 text-red-700',
+              )}
+            >
+              {uploadError}
+            </div>
+          )}
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}

@@ -318,4 +318,62 @@ describe('DocumentListPanel', () => {
     expect(await screen.findByText('失败')).toBeInTheDocument();
     expect(screen.getByRole('button', {name: '重试'})).toBeInTheDocument();
   });
+
+  it('shows upload error toast when backend rejects upload', async () => {
+    vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/documents') {
+        return new Response(JSON.stringify(documents), {status: 200});
+      }
+      if (url === '/api/upload') {
+        return new Response(JSON.stringify({error: '请先配置 API Key'}), {status: 400});
+      }
+      return new Response(JSON.stringify({status: 'ok'}), {status: 200});
+    });
+
+    render(
+      <DocumentListPanel
+        isDarkTheme={false}
+        language="zh"
+        apiUrl={(endpoint) => endpoint}
+        onOpenDetail={vi.fn()}
+        locale={{
+          uploadDoc: '上传文档',
+          uploadFeatureHint: '支持秒传/断点续传',
+          uploadHint: '点击或将文件拖拽到这里上传',
+          uploadSupport: '支持 .xlsx, .csv, .pdf, .docx, .json 等格式',
+          colName: '文件名',
+          colSize: '文件大小',
+          colType: '类型',
+          colUploadTime: '上传时间',
+          colStatus: '状态',
+          colActions: '操作',
+          statusProcessing: '解析中...',
+          statusCompleted: '已完成',
+          statusFailed: '失败',
+          previewAction: '预览',
+          detailAction: '详情',
+          deleteAction: '删除',
+          retryAction: '重试',
+          noDocuments: '暂无文档',
+          previewTitle: '文档预览',
+          previewMetaSize: '大小',
+          previewMetaType: '类型',
+          previewMetaChunks: '分块',
+          previewNoChunks: '该文档暂无分块数据',
+          previewMoreChunks: '个分块，点击「详情」查看全部',
+          openDetails: '查看详情',
+          close: '关闭',
+          uploadExists: '文件已存在',
+          deleteDocConfirm: '确定删除此文档吗？',
+        }}
+      />,
+    );
+
+    const fileInput = await screen.findByTestId('documents-upload-input');
+    const file = new File(['hello'], 'note.txt', {type: 'text/plain'});
+    fireEvent.change(fileInput, {target: {files: [file]}});
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('请先配置 API Key');
+  });
 });
