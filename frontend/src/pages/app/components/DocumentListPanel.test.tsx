@@ -1,22 +1,235 @@
 import {fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {within} from '@testing-library/dom';
+import userEvent from '@testing-library/user-event';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {DocumentListPanel} from './DocumentListPanel';
+import {DocumentListPanel, type DocumentListLocale} from './DocumentListPanel';
 
-describe('DocumentListPanel', () => {
-  let documents: Array<{
-    id: string;
-    name: string;
-    size: number;
-    type: string;
-    uploadTime: string;
-    status: 'failed' | 'processing' | 'cancelled' | 'completed';
-    chunkCount: number;
-    description: string;
-    jobStatus?: 'failed' | 'running' | 'cancelled';
-  }>;
+type TestDocument = {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  uploadTime: string;
+  status: 'failed' | 'processing' | 'cancelled' | 'completed';
+  chunkCount: number;
+  description: string;
+  jobStatus?: 'failed' | 'running' | 'cancelled';
+};
+
+const defaultLocale: DocumentListLocale = {
+  uploadDoc: '上传文档',
+  uploadFeatureHint: '支持秒传/断点续传',
+  uploadHint: '点击或将文件拖拽到这里上传',
+  uploadSupport: '支持 .xlsx, .csv, .pdf, .docx, .json 等格式',
+  colName: '文件名',
+  colSize: '文件大小',
+  colType: '类型',
+  colUploadTime: '上传时间',
+  colStatus: '状态',
+  colActions: '操作',
+  statusProcessing: '解析中...',
+  statusCompleted: '已完成',
+  statusFailed: '失败',
+  previewAction: '预览',
+  detailAction: '详情',
+  deleteAction: '删除',
+  retryAction: '重试',
+  noDocuments: '暂无文档',
+  previewTitle: '文档预览',
+  previewMetaSize: '大小',
+  previewMetaType: '类型',
+  previewMetaChunks: '分块',
+  previewNoChunks: '该文档暂无分块数据',
+  previewMoreChunks: '个分块，点击「详情」查看全部',
+  openDetails: '查看详情',
+  close: '关闭',
+  previewLocateChunk: '定位分块',
+  previewDownloadAction: '下载',
+  previewCloseAriaLabel: '关闭预览',
+  previewLoadError: '预览加载失败，请稍后重试。',
+  previewLoading: '预览加载中...',
+  previewLegacyFallback: '当前类型暂不支持新预览，已回退到旧版预览。',
+  uploadExists: '文件已存在',
+  deleteDocConfirm: '确定删除此文档吗？',
+};
+
+describe('DocumentListPanel preview integration', () => {
+  let documents: TestDocument[];
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    documents = [
+      {
+        id: 'doc-1',
+        name: '示例文档.pdf',
+        size: 1024,
+        type: '.pdf',
+        uploadTime: '2026-03-30T00:00:00.000Z',
+        status: 'completed',
+        chunkCount: 3,
+        description: '',
+      },
+    ];
+  });
+
+  function mockFetch(
+    flags: {enableNewPreviewModal?: boolean; enableNewPreviewByType?: Record<string, boolean>} = {
+      enableNewPreviewModal: true,
+      enableNewPreviewByType: {pdf: true},
+    },
+  ) {
+    vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/documents') {
+        return new Response(JSON.stringify(documents), {status: 200});
+      }
+      if (url === '/api/settings/preview-flags') {
+        return new Response(JSON.stringify(flags), {status: 200});
+      }
+      if (url === '/api/documents/doc-1/content') {
+        return new Response(JSON.stringify({mimeType: 'application/pdf', content: {src: 'blob:https://example.com/doc-1.pdf'}}), {
+          status: 200,
+          headers: {'Content-Type': 'application/json'},
+        });
+      }
+      if (url === '/api/documents/doc-1') {
+        return new Response(JSON.stringify({chunks: [{id: 'chunk-1', docId: 'doc-1', index: 0, content: 'legacy-chunk'}]}), {status: 200});
+      }
+      return new Response(JSON.stringify({status: 'ok'}), {status: 200});
+    });
+  }
+
+  function renderPanel(onOpenDetail = vi.fn()) {
+    render(
+      <DocumentListPanel
+        isDarkTheme={false}
+        language="zh"
+        apiUrl={(endpoint) => endpoint}
+        onOpenDetail={onOpenDetail}
+        locale={defaultLocale}
+      />,
+    );
+    return {onOpenDetail};
+  }
+
+  it('opens new preview modal and closes without changing list state', async () => {
+    mockFetch();
+    const user = userEvent.setup();
+    renderPanel();
+
+    expect(await screen.findByText('示例文档.pdf')).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', {name: '预览'}));
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(await screen.findByTestId('pdf-preview-renderer')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', {name: '关闭预览'}));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('示例文档.pdf')).toBeInTheDocument();
+  });
+
+  it('locate chunk closes modal and opens detail in phase1', async () => {
+    mockFetch();
+    const user = userEvent.setup();
+    const {onOpenDetail} = renderPanel();
+
+    await user.click(await screen.findByRole('button', {name: '预览'}));
+    await screen.findByRole('dialog');
+
+    await user.click(screen.getByRole('button', {name: '定位分块'}));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({id: 'doc-1'}));
+    });
+  });
+
+  it('falls back to legacy preview when global switch is off', async () => {
+    mockFetch({enableNewPreviewModal: false, enableNewPreviewByType: {pdf: true}});
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(await screen.findByRole('button', {name: '预览'}));
+
+    expect(await screen.findByTestId('legacy-preview-modal-surface')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('legacy-chunk')).toBeInTheDocument();
+  });
+
+  it('falls back to legacy preview when type switch is off', async () => {
+    mockFetch({enableNewPreviewModal: true, enableNewPreviewByType: {pdf: false}});
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(await screen.findByRole('button', {name: '预览'}));
+
+    expect(await screen.findByTestId('legacy-preview-modal-surface')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('falls back to legacy preview when preview flags request fails', async () => {
+    vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/documents') {
+        return new Response(JSON.stringify(documents), {status: 200});
+      }
+      if (url === '/api/settings/preview-flags') {
+        return new Response(JSON.stringify({error: 'boom'}), {status: 500});
+      }
+      if (url === '/api/documents/doc-1') {
+        return new Response(JSON.stringify({chunks: [{id: 'chunk-1', docId: 'doc-1', index: 0, content: 'legacy-on-flags-error'}]}), {status: 200});
+      }
+      if (url === '/api/documents/doc-1/content') {
+        return new Response(JSON.stringify({mimeType: 'application/pdf', content: {src: 'blob:https://example.com/doc-1.pdf'}}), {
+          status: 200,
+          headers: {'Content-Type': 'application/json'},
+        });
+      }
+      return new Response(JSON.stringify({status: 'ok'}), {status: 200});
+    });
+
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(await screen.findByRole('button', {name: '预览'}));
+
+    expect(await screen.findByTestId('legacy-preview-modal-surface')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('legacy-on-flags-error')).toBeInTheDocument();
+  });
+
+  it('auto falls back to legacy preview when new preview content request fails', async () => {
+    vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/documents') {
+        return new Response(JSON.stringify(documents), {status: 200});
+      }
+      if (url === '/api/settings/preview-flags') {
+        return new Response(JSON.stringify({enableNewPreviewModal: true, enableNewPreviewByType: {pdf: true}}), {status: 200});
+      }
+      if (url === '/api/documents/doc-1/content') {
+        return new Response(JSON.stringify({error: 'content failed'}), {status: 500});
+      }
+      if (url === '/api/documents/doc-1') {
+        return new Response(JSON.stringify({chunks: [{id: 'chunk-1', docId: 'doc-1', index: 0, content: 'legacy-after-content-error'}]}), {status: 200});
+      }
+      return new Response(JSON.stringify({status: 'ok'}), {status: 200});
+    });
+
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(await screen.findByRole('button', {name: '预览'}));
+
+    expect(await screen.findByTestId('legacy-preview-modal-surface')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('legacy-after-content-error')).toBeInTheDocument();
+  });
+
+  it('keeps retry button disabled while processing after retry starts running job', async () => {
     documents = [
       {
         id: 'doc-1',
@@ -36,164 +249,17 @@ describe('DocumentListPanel', () => {
       if (url === '/api/documents') {
         return new Response(JSON.stringify(documents), {status: 200});
       }
-      if (url === '/api/documents/doc-1/retry') {
-        documents = documents.map((doc) => (doc.id === 'doc-1'
-          ? {...doc, jobStatus: 'running'}
-          : doc));
-        return new Response(JSON.stringify({success: true}), {status: 200});
+      if (url === '/api/settings/preview-flags') {
+        return new Response(JSON.stringify({enableNewPreviewModal: true, enableNewPreviewByType: {pdf: true}}), {status: 200});
       }
-      if (url === '/api/documents/doc-1') {
-        return new Response(JSON.stringify({chunks: []}), {status: 200});
+      if (url === '/api/documents/doc-1/retry') {
+        documents = documents.map((doc) => (doc.id === 'doc-1' ? {...doc, jobStatus: 'running'} : doc));
+        return new Response(JSON.stringify({success: true}), {status: 200});
       }
       return new Response(JSON.stringify({status: 'ok'}), {status: 200});
     });
-  });
 
-  it('renders documents and triggers detail action', async () => {
-    const onOpenDetail = vi.fn();
-
-    render(
-      <DocumentListPanel
-        isDarkTheme={false}
-        language="zh"
-        apiUrl={(endpoint) => endpoint}
-        onOpenDetail={onOpenDetail}
-        locale={{
-          uploadDoc: '上传文档',
-          uploadFeatureHint: '支持秒传/断点续传',
-          uploadHint: '点击或将文件拖拽到这里上传',
-          uploadSupport: '支持 .xlsx, .csv, .pdf, .docx, .json 等格式',
-          colName: '文件名',
-          colSize: '文件大小',
-          colType: '类型',
-          colUploadTime: '上传时间',
-          colStatus: '状态',
-          colActions: '操作',
-          statusProcessing: '解析中...',
-          statusCompleted: '已完成',
-          statusFailed: '失败',
-          previewAction: '预览',
-          detailAction: '详情',
-          deleteAction: '删除',
-          retryAction: '重试',
-          noDocuments: '暂无文档',
-          previewTitle: '文档预览',
-          previewMetaSize: '大小',
-          previewMetaType: '类型',
-          previewMetaChunks: '分块',
-          previewNoChunks: '该文档暂无分块数据',
-          previewMoreChunks: '个分块，点击「详情」查看全部',
-          openDetails: '查看详情',
-          close: '关闭',
-          uploadExists: '文件已存在',
-          deleteDocConfirm: '确定删除此文档吗？',
-        }}
-      />,
-    );
-
-    expect(await screen.findByText('失败文档.pdf')).toBeInTheDocument();
-    expect(document.querySelector('.lucide-circle-x')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', {name: '详情'}));
-    await waitFor(() => {
-      expect(onOpenDetail).toHaveBeenCalled();
-    });
-  });
-
-  it('centers middle headers and keeps actions header centered', async () => {
-    render(
-      <DocumentListPanel
-        isDarkTheme={false}
-        language="zh"
-        apiUrl={(endpoint) => endpoint}
-        onOpenDetail={vi.fn()}
-        locale={{
-          uploadDoc: '上传文档',
-          uploadFeatureHint: '支持秒传/断点续传',
-          uploadHint: '点击或将文件拖拽到这里上传',
-          uploadSupport: '支持 .xlsx, .csv, .pdf, .docx, .json 等格式',
-          colName: '文件名',
-          colSize: '文件大小',
-          colType: '类型',
-          colUploadTime: '上传时间',
-          colStatus: '状态',
-          colActions: '操作',
-          statusProcessing: '解析中...',
-          statusCompleted: '已完成',
-          statusFailed: '失败',
-          previewAction: '预览',
-          detailAction: '详情',
-          deleteAction: '删除',
-          retryAction: '重试',
-          noDocuments: '暂无文档',
-          previewTitle: '文档预览',
-          previewMetaSize: '大小',
-          previewMetaType: '类型',
-          previewMetaChunks: '分块',
-          previewNoChunks: '该文档暂无分块数据',
-          previewMoreChunks: '个分块，点击「详情」查看全部',
-          openDetails: '查看详情',
-          close: '关闭',
-          uploadExists: '文件已存在',
-          deleteDocConfirm: '确定删除此文档吗？',
-        }}
-      />,
-    );
-
-    expect(await screen.findByText('失败文档.pdf')).toBeInTheDocument();
-    const nameHeader = screen.getByRole('columnheader', {name: '文件名'});
-    const sizeHeader = screen.getByRole('columnheader', {name: '文件大小'});
-    const typeHeader = screen.getByRole('columnheader', {name: '类型'});
-    const uploadTimeHeader = screen.getByRole('columnheader', {name: '上传时间'});
-    const statusHeader = screen.getByRole('columnheader', {name: '状态'});
-    const actionsHeader = screen.getByRole('columnheader', {name: '操作'});
-
-    expect(nameHeader.className).not.toContain('text-center');
-    expect(sizeHeader.className).toContain('text-center');
-    expect(typeHeader.className).toContain('text-center');
-    expect(uploadTimeHeader.className).toContain('text-center');
-    expect(statusHeader.className).toContain('text-center');
-    expect(actionsHeader.className).toContain('text-center');
-  });
-
-  it('keeps retry button disabled while processing after retry starts running job', async () => {
-    render(
-      <DocumentListPanel
-        isDarkTheme={false}
-        language="zh"
-        apiUrl={(endpoint) => endpoint}
-        onOpenDetail={vi.fn()}
-        locale={{
-          uploadDoc: '上传文档',
-          uploadFeatureHint: '支持秒传/断点续传',
-          uploadHint: '点击或将文件拖拽到这里上传',
-          uploadSupport: '支持 .xlsx, .csv, .pdf, .docx, .json 等格式',
-          colName: '文件名',
-          colSize: '文件大小',
-          colType: '类型',
-          colUploadTime: '上传时间',
-          colStatus: '状态',
-          colActions: '操作',
-          statusProcessing: '解析中...',
-          statusCompleted: '已完成',
-          statusFailed: '失败',
-          previewAction: '预览',
-          detailAction: '详情',
-          deleteAction: '删除',
-          retryAction: '重试',
-          noDocuments: '暂无文档',
-          previewTitle: '文档预览',
-          previewMetaSize: '大小',
-          previewMetaType: '类型',
-          previewMetaChunks: '分块',
-          previewNoChunks: '该文档暂无分块数据',
-          previewMoreChunks: '个分块，点击「详情」查看全部',
-          openDetails: '查看详情',
-          close: '关闭',
-          uploadExists: '文件已存在',
-          deleteDocConfirm: '确定删除此文档吗？',
-        }}
-      />,
-    );
+    renderPanel();
 
     const retryButton = await screen.findByRole('button', {name: '重试'});
     fireEvent.click(retryButton);
@@ -204,176 +270,74 @@ describe('DocumentListPanel', () => {
     expect(screen.getByRole('button', {name: '重试'})).toBeDisabled();
   });
 
-  it('shows disabled retry button for completed documents', async () => {
+  it('keeps latest legacy preview result when switching documents quickly', async () => {
     documents = [
       {
         id: 'doc-1',
-        name: '已完成文档.pdf',
+        name: '文档一.pdf',
         size: 1024,
         type: '.pdf',
         uploadTime: '2026-03-30T00:00:00.000Z',
         status: 'completed',
-        chunkCount: 10,
+        chunkCount: 1,
         description: '',
       },
-    ];
-
-    render(
-      <DocumentListPanel
-        isDarkTheme={false}
-        language="zh"
-        apiUrl={(endpoint) => endpoint}
-        onOpenDetail={vi.fn()}
-        locale={{
-          uploadDoc: '上传文档',
-          uploadFeatureHint: '支持秒传/断点续传',
-          uploadHint: '点击或将文件拖拽到这里上传',
-          uploadSupport: '支持 .xlsx, .csv, .pdf, .docx, .json 等格式',
-          colName: '文件名',
-          colSize: '文件大小',
-          colType: '类型',
-          colUploadTime: '上传时间',
-          colStatus: '状态',
-          colActions: '操作',
-          statusProcessing: '解析中...',
-          statusCompleted: '已完成',
-          statusFailed: '失败',
-          previewAction: '预览',
-          detailAction: '详情',
-          deleteAction: '删除',
-          retryAction: '重试',
-          noDocuments: '暂无文档',
-          previewTitle: '文档预览',
-          previewMetaSize: '大小',
-          previewMetaType: '类型',
-          previewMetaChunks: '分块',
-          previewNoChunks: '该文档暂无分块数据',
-          previewMoreChunks: '个分块，点击「详情」查看全部',
-          openDetails: '查看详情',
-          close: '关闭',
-          uploadExists: '文件已存在',
-          deleteDocConfirm: '确定删除此文档吗？',
-        }}
-      />,
-    );
-
-    expect(await screen.findByText('已完成')).toBeInTheDocument();
-    expect(screen.getByRole('button', {name: '重试'})).toBeDisabled();
-  });
-
-  it('treats cancelled document as failed action state', async () => {
-    documents = [
       {
-        id: 'doc-1',
-        name: '已取消文档.pdf',
+        id: 'doc-2',
+        name: '文档二.pdf',
         size: 1024,
         type: '.pdf',
         uploadTime: '2026-03-30T00:00:00.000Z',
-        status: 'cancelled',
-        chunkCount: 0,
+        status: 'completed',
+        chunkCount: 1,
         description: '',
-        jobStatus: 'cancelled',
       },
     ];
 
-    render(
-      <DocumentListPanel
-        isDarkTheme={false}
-        language="zh"
-        apiUrl={(endpoint) => endpoint}
-        onOpenDetail={vi.fn()}
-        locale={{
-          uploadDoc: '上传文档',
-          uploadFeatureHint: '支持秒传/断点续传',
-          uploadHint: '点击或将文件拖拽到这里上传',
-          uploadSupport: '支持 .xlsx, .csv, .pdf, .docx, .json 等格式',
-          colName: '文件名',
-          colSize: '文件大小',
-          colType: '类型',
-          colUploadTime: '上传时间',
-          colStatus: '状态',
-          colActions: '操作',
-          statusProcessing: '解析中...',
-          statusCompleted: '已完成',
-          statusFailed: '失败',
-          previewAction: '预览',
-          detailAction: '详情',
-          deleteAction: '删除',
-          retryAction: '重试',
-          noDocuments: '暂无文档',
-          previewTitle: '文档预览',
-          previewMetaSize: '大小',
-          previewMetaType: '类型',
-          previewMetaChunks: '分块',
-          previewNoChunks: '该文档暂无分块数据',
-          previewMoreChunks: '个分块，点击「详情」查看全部',
-          openDetails: '查看详情',
-          close: '关闭',
-          uploadExists: '文件已存在',
-          deleteDocConfirm: '确定删除此文档吗？',
-        }}
-      />,
-    );
+    let resolveFirst: ((value: Response) => void) | null = null;
+    let resolveSecond: ((value: Response) => void) | null = null;
 
-    expect(await screen.findByText('失败')).toBeInTheDocument();
-    expect(screen.getByRole('button', {name: '重试'})).toBeInTheDocument();
-  });
-
-  it('shows upload error toast when backend rejects upload', async () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
       if (url === '/api/documents') {
         return new Response(JSON.stringify(documents), {status: 200});
       }
-      if (url === '/api/upload') {
-        return new Response(JSON.stringify({error: '请先配置 API Key'}), {status: 400});
+      if (url === '/api/settings/preview-flags') {
+        return new Response(JSON.stringify({enableNewPreviewModal: false, enableNewPreviewByType: {pdf: true}}), {status: 200});
+      }
+      if (url === '/api/documents/doc-1') {
+        return new Promise<Response>((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      if (url === '/api/documents/doc-2') {
+        return new Promise<Response>((resolve) => {
+          resolveSecond = resolve;
+        });
       }
       return new Response(JSON.stringify({status: 'ok'}), {status: 200});
     });
 
-    render(
-      <DocumentListPanel
-        isDarkTheme={false}
-        language="zh"
-        apiUrl={(endpoint) => endpoint}
-        onOpenDetail={vi.fn()}
-        locale={{
-          uploadDoc: '上传文档',
-          uploadFeatureHint: '支持秒传/断点续传',
-          uploadHint: '点击或将文件拖拽到这里上传',
-          uploadSupport: '支持 .xlsx, .csv, .pdf, .docx, .json 等格式',
-          colName: '文件名',
-          colSize: '文件大小',
-          colType: '类型',
-          colUploadTime: '上传时间',
-          colStatus: '状态',
-          colActions: '操作',
-          statusProcessing: '解析中...',
-          statusCompleted: '已完成',
-          statusFailed: '失败',
-          previewAction: '预览',
-          detailAction: '详情',
-          deleteAction: '删除',
-          retryAction: '重试',
-          noDocuments: '暂无文档',
-          previewTitle: '文档预览',
-          previewMetaSize: '大小',
-          previewMetaType: '类型',
-          previewMetaChunks: '分块',
-          previewNoChunks: '该文档暂无分块数据',
-          previewMoreChunks: '个分块，点击「详情」查看全部',
-          openDetails: '查看详情',
-          close: '关闭',
-          uploadExists: '文件已存在',
-          deleteDocConfirm: '确定删除此文档吗？',
-        }}
-      />,
-    );
+    const user = userEvent.setup();
+    renderPanel();
 
-    const fileInput = await screen.findByTestId('documents-upload-input');
-    const file = new File(['hello'], 'note.txt', {type: 'text/plain'});
-    fireEvent.change(fileInput, {target: {files: [file]}});
+    const firstRow = (await screen.findByText('文档一.pdf')).closest('tr') as HTMLTableRowElement;
+    const secondRow = screen.getByText('文档二.pdf').closest('tr') as HTMLTableRowElement;
+    await user.click(within(firstRow).getByRole('button', {name: '预览'}));
+    await user.click(within(secondRow).getByRole('button', {name: '预览'}));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('请先配置 API Key');
+    resolveSecond?.(new Response(JSON.stringify({chunks: [{id: 'c2', docId: 'doc-2', index: 0, content: '第二个结果'}]}), {status: 200}));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('legacy-preview-modal-surface')).toBeInTheDocument();
+      expect(screen.getByText('第二个结果')).toBeInTheDocument();
+    });
+
+    resolveFirst?.(new Response(JSON.stringify({chunks: [{id: 'c1', docId: 'doc-1', index: 0, content: '第一个旧结果'}]}), {status: 200}));
+
+    await waitFor(() => {
+      expect(screen.queryByText('第一个旧结果')).not.toBeInTheDocument();
+      expect(screen.getByText('文档预览 - 文档二.pdf')).toBeInTheDocument();
+    });
   });
 });

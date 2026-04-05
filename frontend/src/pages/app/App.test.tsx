@@ -83,8 +83,27 @@ describe('App', () => {
     });
     vi.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
+      const pathname = new URL(url, 'http://localhost').pathname;
 
-      if (url.includes('/api/documents/doc-1')) {
+      if (pathname === '/api/settings/preview-flags') {
+        return new Response(JSON.stringify({
+          enableNewPreviewModal: true,
+          enableNewPreviewByType: {pdf: true},
+        }), { status: 200 });
+      }
+
+      if (pathname === '/api/documents/doc-1/content') {
+        return new Response(JSON.stringify({
+          mimeType: 'application/pdf',
+          content: {src: 'blob:https://example.com/doc-1.pdf'},
+          totalPages: 3,
+        }), {
+          status: 200,
+          headers: {'Content-Type': 'application/json'},
+        });
+      }
+
+      if (pathname === '/api/documents/doc-1') {
         return new Response(JSON.stringify(detailResponse), { status: 200 });
       }
 
@@ -315,8 +334,8 @@ describe('App', () => {
     const previewButton = await screen.findByTitle('预览');
     await user.click(previewButton);
 
-    expect(await screen.findByText(/文档预览/)).toBeInTheDocument();
-    expect(screen.getByText('预览内容')).toBeInTheDocument();
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(await screen.findByTestId('pdf-preview-renderer')).toBeInTheDocument();
   });
 
   it('selecting a file triggers upload request', async () => {
@@ -503,9 +522,8 @@ describe('App', () => {
     const previewButton = await screen.findByRole('button', { name: 'Preview' });
     await user.click(previewButton);
 
-    expect(await screen.findByText(/Document Preview/)).toBeInTheDocument();
-    expect(screen.getByTestId('preview-modal-surface').className).toContain('bg-slate-900');
-    expect(screen.getAllByRole('button', { name: 'Close' }).length).toBeGreaterThan(0);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close preview' })).toBeInTheDocument();
     expect(screen.getByText('Click or drag files here')).toBeInTheDocument();
     expect(screen.getByTestId('document-dropzone').className).toContain('bg-slate-900/60');
   });

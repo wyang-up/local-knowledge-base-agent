@@ -15,6 +15,7 @@ import { decodePlainTextBuffer, extractPdfText, normalizeUploadedFilename } from
 import { resolveLancePath } from './storage/lance-path.ts';
 import { buildMcpNotification, buildMcpResult, encodeMcpJsonLine } from './utils/mcp-utils.ts';
 import { parseOpenAIStreamBuffer } from './utils/stream-utils.ts';
+import { buildPreviewError, buildPreviewResponsePlan } from './utils/document-preview-content.ts';
 import type { KeySecurityService } from './settings/key-security.ts';
 import { registerSettingsRoutes as registerSettingsRoutesImpl } from './settings/settings-routes.ts';
 import { createSettingsAuditContext } from './settings/settings-auth.ts';
@@ -88,6 +89,18 @@ type ChatHistoryItem = {
   content: string;
 };
 
+type PreviewFlagsByType = {
+  pdf: boolean;
+  table: boolean;
+  json: boolean;
+  text: boolean;
+};
+
+type PreviewFlagsResponse = {
+  enableNewPreviewModal: boolean;
+  enableNewPreviewByType: PreviewFlagsByType;
+};
+
 function normalizeChatHistory(input: unknown): ChatHistoryItem[] {
   if (!Array.isArray(input)) {
     return [];
@@ -141,6 +154,134 @@ function readOpenAIEmbedding(data: any): number[] {
 
 function buildSystemPrompt(context: string) {
   return SYSTEM_PROMPT_TEMPLATE.replace('{{INJECT_CONTEXT_HERE}}', context);
+}
+
+function parseBooleanEnvFlag(raw: string | undefined, fallback: boolean) {
+  if (typeof raw !== 'string') {
+    return fallback;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+
+  if (normalized === '1' || normalized === 'true' || normalized === 'on' || normalized === 'yes') {
+    return true;
+  }
+
+  if (normalized === '0' || normalized === 'false' || normalized === 'off' || normalized === 'no') {
+    return false;
+  }
+
+  return fallback;
+}
+
+function parsePreviewByType(raw: string | undefined): PreviewFlagsByType {
+  const defaults: PreviewFlagsByType = {
+    pdf: true,
+    table: true,
+    json: true,
+    text: true,
+  };
+
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return defaults;
+  }
+
+  const result: PreviewFlagsByType = { ...defaults };
+  const pairs = raw.split(',');
+  for (const pair of pairs) {
+    const [rawKey, rawValue] = pair.split(':', 2);
+    const key = rawKey?.trim().toLowerCase();
+    if (key !== 'pdf' && key !== 'table' && key !== 'json' && key !== 'text') {
+      continue;
+    }
+    result[key] = parseBooleanEnvFlag(rawValue, defaults[key]);
+  }
+
+  return result;
+}
+
+export function resolvePreviewFlagsFromEnv(env: NodeJS.ProcessEnv = process.env): PreviewFlagsResponse {
+  return {
+    enableNewPreviewModal: parseBooleanEnvFlag(env.ENABLE_NEW_PREVIEW_MODAL, true),
+    enableNewPreviewByType: parsePreviewByType(env.ENABLE_NEW_PREVIEW_BY_TYPE),
+  };
+}
+
+function isPreviewTypeSupported(docType: unknown) {
+  if (typeof docType !== 'string') {
+    return false;
+  }
+  const normalized = docType.trim().toLowerCase();
+  return normalized === '.pdf'
+    || normalized === '.csv'
+    || normalized === '.tsv'
+    || normalized === '.xls'
+    || normalized === '.xlsx'
+    || normalized === '.json'
+    || normalized === '.txt'
+    || normalized === '.md'
+    || normalized === '.markdown'
+    || normalized === '.log';
+}
+
+export function registerDocumentPreviewRoutes(app: express.Express, db: any) {
+  app.get('/api/documents/:id/content', async (req, res) => {
+    const doc = await db.get('SELECT id, type, filePath FROM documents WHERE id = ?', req.params.id);
+    if (!doc) {
+      return res.status(404).json(buildPreviewError('NOT_FOUND', 'Document not found', false));
+    }
+
+    if (!isPreviewTypeSupported(doc.type)) {
+      return res.status(415).json(buildPreviewError('UNSUPPORTED_TYPE', 'Preview is not supported for this file type', false, { type: doc.type }));
+    }
+
+    try {
+      const fileStat = fs.statSync(doc.filePath);
+      const plan = buildPreviewResponsePlan(req.header('range'), fileStat.size);
+
+      if (plan.status === 416) {
+        res.setHeader('Content-Range', plan.headers['Content-Range']);
+        return res.status(416).json(buildPreviewError('RANGE_NOT_SATISFIABLE', 'Invalid Range header', false));
+      }
+
+      if (plan.status === 200) {
+        res.setHeader('Content-Length', plan.headers['Content-Length']);
+      }
+
+      if (plan.status === 206) {
+        res.setHeader('Accept-Ranges', plan.headers['Accept-Ranges']);
+        res.setHeader('Content-Range', plan.headers['Content-Range']);
+        res.setHeader('Content-Length', plan.headers['Content-Length']);
+      }
+
+      const stream = plan.status === 206
+        ? fs.createReadStream(doc.filePath, { start: plan.range.start, end: plan.range.end })
+        : fs.createReadStream(doc.filePath);
+
+      stream.on('error', () => {
+        if (!res.headersSent) {
+          res.status(500).json(buildPreviewError('READ_FAILED', 'Failed to read document content', true));
+          return;
+        }
+        res.destroy();
+      });
+
+      res.status(plan.status);
+      stream.pipe(res);
+      return;
+    } catch (error: any) {
+      return res.status(500).json(buildPreviewError('READ_FAILED', 'Failed to read document content', true, {
+        reason: error?.message ?? 'unknown-read-error',
+      }));
+    }
+  });
+
+  app.get('/api/settings/preview-flags', (req, res) => {
+    res.json(resolvePreviewFlagsFromEnv(process.env));
+  });
 }
 
 function mapSources(topChunks: any[]) {
@@ -398,6 +539,7 @@ async function startServer() {
   app.get('/api/health', (req, res) => {
     res.json({ ok: true, service: 'backend', port: PORT });
   });
+  registerDocumentPreviewRoutes(app, db);
   registerSettingsRoutes(app, db, {
     storagePath: LANCE_PATH,
     documentStoragePath: UPLOADS_DIR,
