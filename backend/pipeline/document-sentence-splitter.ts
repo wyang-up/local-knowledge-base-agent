@@ -261,7 +261,7 @@ function splitByLegacyBoundary(text: string) {
   return (matches ?? [normalized]).map((segment) => segment.trim()).filter(Boolean);
 }
 
-function isEnglishBoundaryProtectionEnabled() {
+export function isEnglishBoundaryProtectionEnabled() {
   const raw = process.env.ENABLE_ENGLISH_BOUNDARY_PROTECTION;
   if (raw === undefined) {
     return true;
