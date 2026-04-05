@@ -213,6 +213,15 @@ describe('english sentence boundary contracts (RED)', () => {
     ]);
   });
 
+  it('tie-breaker: prefers numbering over nested version candidate', () => {
+    const text = 'See Sec. 1.2.3 now. Next sentence.';
+
+    expect(splitSentencesForTest(text)).toEqual([
+      'See Sec. 1.2.3 now.',
+      'Next sentence.',
+    ]);
+  });
+
   it('keeps section numbering Sec. 3.2.1 in one sentence', () => {
     const text = 'See Sec. 3.2.1 in v1.2.3 docs. Next sentence.';
 
