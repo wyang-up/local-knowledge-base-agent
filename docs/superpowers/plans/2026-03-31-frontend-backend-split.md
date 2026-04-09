@@ -1,5 +1,7 @@
 # 前后端分离改造 Implementation Plan
 
+> Status: Historical implementation plan. This migration has already landed and is kept as architecture history.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将当前单进程项目改造成单仓双服务的前后端分离架构，前端与后端可独立启动与部署。

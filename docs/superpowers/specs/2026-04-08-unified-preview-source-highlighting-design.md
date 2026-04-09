@@ -1,5 +1,7 @@
 # Unified Preview Source Highlighting Design
 
+> Status: Current reference design for source-preview linkage and non-PDF block highlighting. PDF sections below were superseded in implementation by the later decision to keep the original embedded PDF preview style instead of shipping a custom `pdfjs` page-shell viewer.
+
 ## Goal
 
 让所有文档预览类型在从问答溯源进入时，都能稳定完成同一套闭环行为：自动定位到目标朔源块、以统一的块级高亮样式展示、支持点击高亮块跳转详情、并保留返回 AI 回答的路径。
@@ -97,22 +99,15 @@
 
 ### PDF
 
-PDF 预览必须使用标准 `pdfjs` 页面结构，恢复到正常 PDF 阅读观感，不得使用浏览器原生 iframe，也不得退化为纯文本页或“看起来像 PDF 的替代壳层”。页面结构固定为三层：
+PDF 最终实现已回退为最初的嵌入式原生预览风格：
 
-- `canvas page`：负责渲染真正的 PDF 页面内容
-- `text layer`：透明文本层，仅用于文本定位、选择和高亮锚点
-- `overlay layer`：只承载轻量高亮覆盖与旁侧提示条
+- 继续使用 iframe 承载原生 PDF 预览
+- 隐藏原生顶部工具栏
+- 默认按页宽显示
+- 溯源定位优先使用页码与搜索参数
+- 顶部黄色定位条仅作辅助提示，不额外引入自造 `pdfjs` 页面壳层
 
-核心策略：
-
-- 使用 `pdfjs-dist` 渲染真实页面到 `canvas`
-- 在 `canvas` 上方叠加标准 `text layer`，避免把文本本身作为预览主体展示
-- 根据 `pageStart/pageEnd + textQuote/offset` 找到最接近的正文范围
-- 在正文原位置上叠加轻量半透明黄底高亮，尽量贴合原文块边界
-- 在命中区域旁侧显示轻量提示条，说明该区域为命中的溯源块
-- 自动滚动到目标块，并支持高亮块点击跳详情
-
-PDF 的高亮优先级为“原文阅读感优先”。高亮和提示必须可见，但不能像整段荧光笔覆盖那样压住原 PDF 的阅读体验。任何为了测试或降级而引入的替代性展示层，都不能破坏“第一眼看上去就是正常 PDF 页面”的观感。
+因此，PDF 不再纳入本文档中的“统一块级正文高亮”实现范围；当前统一块级高亮能力实际覆盖 TXT / DOCX / JSON / Excel / CSV 预览。
 
 ### TXT / DOCX
 
@@ -172,8 +167,8 @@ JSON 继续保持原文文本视图，不切回树形结构。实现策略：
 
 以下条件全部满足后，视为实现完成：
 
-1. PDF / TXT / JSON / Excel / CSV 五类预览都能自动滚动到目标块
-2. PDF 保持原版页面视觉，其它预览保持各自原文视图；所有类型都使用统一的块级高亮语义规范
+1. TXT / JSON / Excel / CSV 四类预览都能自动滚动到目标块；PDF 保持页码与搜索参数定位
+2. PDF 保持原生嵌入式预览风格，其它预览保持各自原文视图并使用统一的块级高亮语义规范
 3. 高亮块本体可点击跳转详情
 4. 顶部定位条保留，但正文高亮始终可见
 5. 任一预览类型在结构化定位缺失时，仍能退化到可见高亮，而不是静默失败

@@ -1,5 +1,7 @@
 # 文档解析任务编排与向量化重构 Implementation Plan
 
+> Status: Historical implementation plan. Keep as pipeline evolution history rather than an active execution document.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将当前上传后直接解析的粗糙流程，升级为带状态机、阶段进度、分块元数据、checkpoint、断点恢复、阶段级重试、文档级队列与前端可视化控制的完整文档处理系统。

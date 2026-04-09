@@ -1,5 +1,7 @@
 # 前后端热更新设计
 
+> Status: Historical design that remains broadly aligned with the current repo. Treat this file as background context; use `README.md` and root `package.json` for the latest runnable commands.
+
 ## 目标
 
 - 前端开发时支持 Vite HMR，无需整页刷新

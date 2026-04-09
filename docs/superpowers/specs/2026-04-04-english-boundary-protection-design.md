@@ -1,5 +1,7 @@
 # 英文句边界防误切设计（方案A）
 
+> Status: Historical design. The underlying chunking hardening has landed, but this document is retained as design history rather than the latest source of truth for current pipeline behavior.
+
 ## 目标
 
 - 在英文句切分中，避免将缩写、版本号、常见编号中的 `.` 误识别为句边界。

@@ -1,10 +1,12 @@
 # PDF Original-Page Highlight Implementation Plan
 
+> Status: Historical / superseded. This plan was explored but not kept as the final shipped direction. The project ultimately reverted to the original embedded PDF preview style instead of maintaining a custom `pdfjs` original-page highlight renderer.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让 PDF 预览恢复原版页面视觉，同时支持从溯源进入后的自动定位、轻量半透明覆盖高亮和旁侧提示条。
+**Goal:** 让 PDF 预览恢复原版页面视觉，同时探索从溯源进入后的自动定位、轻量半透明覆盖高亮和旁侧提示条。
 
-**Architecture:** 保留 `pdfjs-dist` 作为前端渲染引擎，但从当前“抽取页面文本并列表展示”的方案切回“页面画布层 + 文本层 + 高亮覆盖层”的原版页面渲染。定位优先使用结构化页码/引用片段，命中后在页面原位置叠加轻量高亮框和辅助提示条，不再回退为纯文本页替代视图。
+**Architecture:** 该方案原本计划保留 `pdfjs-dist` 作为前端渲染引擎，并通过页面画布层 + 文本层 + 高亮覆盖层恢复原版页面渲染。后来项目决定回退为最初的嵌入式原生 PDF 预览，因此本文档仅保留为历史计划记录。
 
 **Tech Stack:** TypeScript, React, pdfjs-dist, Vitest, Testing Library
 

@@ -1,5 +1,7 @@
 # Document Detail + Chunking Optimization Implementation Plan
 
+> Status: Historical implementation plan. The detail page and chunk metadata behavior have continued evolving after this plan.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver document detail page UI optimization and backend chunking metadata enhancement with tree navigation support, while only adding new logic and keeping existing behavior intact.

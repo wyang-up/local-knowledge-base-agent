@@ -6,15 +6,15 @@
 - 后端：Express API（默认 `http://localhost:8080`）
 - AI 服务：SiliconFlow（OpenAI 兼容接口，默认 `https://api.siliconflow.cn/v1`）
 
-## 当前版本对齐点（2026-04-05）
+## 当前版本对齐点（2026-04-09）
 
-- 文档详情页已升级为三栏联动：左侧目录树 / 中间分块卡片 / 右侧信息面板。
-- 左侧目录采用树形层级与单行标题规则（超过 18 字自动省略，hover 可看完整标题）。
-- 中栏文档标题 sticky 固定，分块内容在标题下方独立滚动。
-- 分块卡片头部展示结构化元信息：短章节名、Token、页码、语言。
-- 上传失败会在上传区就近展示错误提示（优先显示后端 `error`）。
-- 后端分块链路补齐树形元数据：`lang`、`title`、`hierarchy`、`level`、`nodeType`，API 对外补充 `node_type`。
-- `Appendix` 保持单块；`References` 按条目分块。
+- 文档详情页维持三栏联动：左侧目录树 / 中间分块卡片 / 右侧信息面板。
+- QA 溯源已打通到预览与详情：支持 `QA -> 预览 -> 详情 -> 返回AI回答` 的闭环。
+- 文本 / JSON / 表格预览支持分块级高亮，并可从高亮区返回 AI 回答。
+- PDF 预览已回退为最初的嵌入式原生预览风格：隐藏原生工具栏、默认按页宽显示，不再使用自造 `pdfjs` 页面壳层。
+- 删除文档时会同步清理：会话溯源引用、预览状态、详情高亮状态、pipeline artifacts、原始上传文件与文档记录。
+- 设置页已锁定向量库与文档目录路径，避免运行时偏离项目目录约束。
+- 根目录新增统一测试脚本，且前后端测试统一排除 `.worktrees/**`。
 
 ## 目录结构
 
@@ -157,6 +157,17 @@ npm run dev:backend
 - `npm run dev:frontend`：只启动 Vite 前端开发服务器
 - `npm run dev:backend`：只启动后端 watch 模式，保存后自动重启
 
+## 测试脚本
+
+- `npm test`：运行前端默认测试集
+- `npm run test:frontend:stable`：使用稳定参数运行前端测试（单 worker / 非 isolate）
+- `npm run test:backend`：运行后端删除一致性相关测试集
+- `npm run test:regression`：运行当前项目的关键前后端回归测试子集
+
+说明：
+
+- 根级 `vitest.config.ts` 和 `frontend/config/vitest.config.ts` 都已排除 `.worktrees/**`，避免历史 worktree 污染测试结果。
+
 ## 端口占用排查
 
 如果 `npm run dev` 启动失败，最常见原因是 `5173` 或 `8080` 已经被旧进程占用。
@@ -197,7 +208,8 @@ npm run dev:backend
 
 - `frontend/index.html`：Vite 页面入口模板，挂载 React 根节点。
 - `frontend/config/vite.config.ts`：前端开发与构建配置（HMR、`/api` 代理、别名等）。
-- `frontend/config/vitest.config.ts`：前端测试运行配置（jsdom、setup 文件、测试入口）。
+- `frontend/config/vitest.config.ts`：前端测试运行配置（jsdom、setup 文件、测试入口、排除 `.worktrees/**`）。
+- `vitest.config.ts`：项目根级 Vitest 配置，当前主要用于后端测试与统一排除 `.worktrees/**`。
 - `frontend/config/.env.example`：前端环境变量示例。
 - `frontend/src/index.css`：全局样式入口。
 - `frontend/src/vite-env.d.ts`：Vite 类型声明。

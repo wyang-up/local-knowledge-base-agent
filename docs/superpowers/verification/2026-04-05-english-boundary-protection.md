@@ -1,5 +1,7 @@
 # English Boundary Protection Verification (2026-04-05)
 
+> Status: Historical verification snapshot. Keep as prior evidence for chunking hardening, not as the latest regression baseline.
+
 ## Verification Metadata
 
 - Execution environment:

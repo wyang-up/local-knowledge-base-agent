@@ -1,10 +1,12 @@
 # Unified Preview Source Highlighting Implementation Plan
 
+> Status: Historical implementation plan. The non-PDF parts of this plan were largely implemented, but the PDF portion was later rolled back to the original embedded preview style instead of keeping the custom `pdfjs` page-shell renderer.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让 PDF、TXT/DOCX、JSON、Excel/CSV 预览都能在从问答溯源进入时自动定位到目标块，并用统一的块级高亮样式显示，支持点击高亮块跳转详情。
+**Goal:** 让 TXT/DOCX、JSON、Excel/CSV 预览都能在从问答溯源进入时自动定位到目标块，并用统一的块级高亮样式显示；PDF 保持原生嵌入式预览并使用页码/搜索参数辅助定位。
 
-**Architecture:** 在前端新增统一的预览定位目标模型与解析工具层，把“来源信息 -> 渲染器可消费的定位数据”标准化。PDF 从 iframe 方案升级为 `pdfjs-dist` 自渲染文本层；文本、JSON、表格分别实现块级高亮渲染，但共享统一的高亮视觉样式与点击跳详情契约。
+**Architecture:** 在前端新增统一的预览定位目标模型与解析工具层，把“来源信息 -> 渲染器可消费的定位数据”标准化。文本、JSON、表格分别实现块级高亮渲染，共享统一的高亮视觉样式与点击跳详情契约；PDF 最终不采用自造阅读器，保持 iframe 方案。
 
 **Tech Stack:** TypeScript, React, pdfjs-dist, Vitest, Testing Library
 

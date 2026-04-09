@@ -1,5 +1,7 @@
 # Settings Center Rebuild Implementation Plan
 
+> Status: Historical implementation plan. Major parts have landed, but the current settings behavior has evolved beyond this plan.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a desktop-grade 3-card settings center with provider-specific config, secure key reveal flow, storage local-bridge actions, module-level saves, and global save-all.

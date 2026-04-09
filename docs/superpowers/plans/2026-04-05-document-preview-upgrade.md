@@ -1,5 +1,7 @@
 # Document Preview Upgrade Implementation Plan
 
+> Status: Historical implementation plan. The preview framework shipped in a different final shape than some PDF-specific directions described here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将文档列表页的轻量 chunk 预览升级为原文件级本地预览器（PDF/表格/JSON/文本），并补齐后端内容读取契约与前端统一预览架构。

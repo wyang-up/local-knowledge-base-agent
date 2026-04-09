@@ -1,5 +1,7 @@
 # Verification - Document Detail and Chunking Optimization
 
+> Status: Historical verification snapshot. The detail page and chunk metadata behavior have evolved further after this verification run.
+
 ## Commands Executed
 
 - `npx vitest run backend/pipeline/document-chunker.test.ts`

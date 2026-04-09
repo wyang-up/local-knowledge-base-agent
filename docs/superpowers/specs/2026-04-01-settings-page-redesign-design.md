@@ -1,5 +1,7 @@
 # 桌面端系统设置页重设计方案（B端蓝色简约风）
 
+> Status: Historical design. The settings page has continued evolving after this design review, including API key masking, storage-path locking, and save-all orchestration changes.
+
 日期：2026-04-01  
 状态：已完成设计评审（待用户最终审阅）
 

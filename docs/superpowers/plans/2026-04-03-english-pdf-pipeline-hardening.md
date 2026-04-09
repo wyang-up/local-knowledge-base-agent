@@ -1,5 +1,7 @@
 # English PDF Pipeline Hardening Implementation Plan
 
+> Status: Historical implementation plan. This file documents an earlier hardening phase and is no longer the latest source of truth for preview or pipeline behavior.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Fix English PDF documents failing after upload by upgrading PDF/DOCX chunking to bilingual-aware boundaries, making short-segment merging conditional, and improving embedding throughput with conservative batch processing.

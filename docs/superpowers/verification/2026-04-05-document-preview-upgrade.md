@@ -1,5 +1,7 @@
 # Verification - Document Preview Upgrade
 
+> Status: Historical verification snapshot. This file records the early preview-upgrade verification state on 2026-04-05 and no longer reflects the current codebase in full. Refer to the latest App / preview renderer / deletion-consistency tests for current regression status.
+
 ## Commands Executed
 
 - `npx vitest run backend/server.preview-content.test.ts backend/utils/document-preview-content.test.ts frontend/src/pages/app/components/preview/useDocumentPreviewResource.test.tsx frontend/src/pages/app/components/DocumentListPanel.test.tsx --pool vmThreads --config frontend/config/vitest.config.ts`

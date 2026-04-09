@@ -1,5 +1,7 @@
 # 文档预览能力升级设计（方案A）
 
+> Status: Historical design. Large parts of the preview framework described here were implemented, but several assumptions are now outdated: the project already supports QA source linkage into preview/detail, and PDF ultimately reverted to the original embedded preview style instead of keeping a custom staged `pdfjs` viewer.
+
 ## 目标
 
 - 将文档列表中的“眼睛图标轻量预览”升级为“原文件级预览器”。
@@ -15,9 +17,9 @@
 - 通用动作：关闭、下载、查看详情、定位分块（第一阶段固定行为：跳转详情页并携带 `documentId`，不做预览内高亮）。
 - 统一异常兜底和降级路径。
 
-## 非目标（第一阶段明确不做）
+## 非目标（第一阶段明确不做，现已部分过时）
 
-- 问答页点击溯源链接后直接在预览内精确高亮 chunk。
+- 问答页点击溯源链接后直接在预览内精确高亮 chunk。（现状：TXT / JSON / 表格已支持块级高亮；PDF 保持原生嵌入式预览并使用页码/搜索参数辅助定位）
 - PDF 高级批注、缩略图侧栏、复杂版面重排。
 - Excel 公式引擎还原、复杂样式还原。
 - JSON 高级全文检索跳转系统（跨层级高亮定位）。
@@ -119,9 +121,9 @@
 
 ### PDF
 
-- 第一阶段支持：翻页、缩放、页码跳转、基础文本选择。
-- 采用首屏优先加载策略，后续页按需加载。
-- 失败时降级到友好提示 + 下载 + 查看详情。
+- 当前实际实现已回退为最初的嵌入式原生 PDF 预览风格。
+- 隐藏原生工具栏、默认按页宽显示、通过页码/搜索参数做辅助定位。
+- 不再沿着本文档中隐含的“持续升级自造 PDF 阅读器”路线推进。
 
 ### Excel/CSV
 

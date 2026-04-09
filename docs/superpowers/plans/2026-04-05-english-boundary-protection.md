@@ -1,5 +1,7 @@
 # English Boundary Protection Implementation Plan
 
+> Status: Historical implementation plan. Keep as chunking evolution history.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Prevent false English sentence boundaries for abbreviations, versions, and numbering patterns while preserving true sentence endings.

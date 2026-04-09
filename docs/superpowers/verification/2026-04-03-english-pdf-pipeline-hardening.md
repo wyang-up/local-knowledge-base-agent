@@ -1,5 +1,7 @@
 # English PDF Pipeline Hardening Verification
 
+> Status: Historical verification snapshot. Useful as evidence for that hardening phase, but not a complete statement of current project health.
+
 ## Commands
 
 ```bash

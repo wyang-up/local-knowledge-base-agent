@@ -4,7 +4,7 @@
 
 目标很简单：
 
-- 永远不直接在 `main` 上开发
+- 原则上不直接在 `main` 上开发
 - 所有功能都通过功能分支 + PR 合并
 - 尽量减少冲突，降低把脏改动带进主分支的概率
 
@@ -12,7 +12,7 @@
 
 ## 一、核心原则
 
-1. `main` 只作为稳定主线，不直接开发。
+1. `main` 只作为稳定主线，原则上不直接开发。
 2. 每个新需求都从最新 `main` 切出一个新分支。
 3. 所有代码修改、测试、提交都在功能分支完成。
 4. 通过 PR 合并回 `main`，不要直接 push 到 `main`。
@@ -176,6 +176,11 @@ git checkout main
 git pull origin main
 git worktree add .worktrees/feature-<short-name> -b feature/<short-name>
 ```
+
+补充说明：
+
+- 如果临时在 `main` 上做过修复或紧急提交，做完后应尽快恢复到分支 / PR 流程，不要把“例外”当成默认流程。
+- `.worktrees/` 目录已被测试配置显式排除，避免隔离工作目录污染 Vitest 扫描结果。
 
 例子：
 
