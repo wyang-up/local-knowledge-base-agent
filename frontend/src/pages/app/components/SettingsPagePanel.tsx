@@ -10,6 +10,7 @@ type SettingsPagePanelProps = {
   providerLabelMap: Record<string, string>;
   activeProviderDraft: any;
   activeProviderApiKey: string;
+  hasApiKeyConfigured?: boolean;
   providerModelsByProvider: Record<string, any[]>;
   fallbackProviderModelsMap: Record<string, any[]>;
   revealedProviderSet: Set<string>;
@@ -18,6 +19,7 @@ type SettingsPagePanelProps = {
   documentStorageHint: string;
   vectorStorageStatsText: string;
   docsStorageStatsText: string;
+  storageLocked?: boolean;
   settingsController: any;
   updateUiFieldWithImmediateSave: (field: 'language' | 'theme', value: string) => void;
   updateProviderField: (providerId: string, field: string, value: string) => void;
@@ -37,6 +39,7 @@ export function SettingsPagePanel({
   providerLabelMap,
   activeProviderDraft,
   activeProviderApiKey,
+  hasApiKeyConfigured = false,
   providerModelsByProvider,
   fallbackProviderModelsMap,
   revealedProviderSet,
@@ -45,6 +48,7 @@ export function SettingsPagePanel({
   documentStorageHint,
   vectorStorageStatsText,
   docsStorageStatsText,
+  storageLocked = false,
   settingsController,
   updateUiFieldWithImmediateSave,
   updateProviderField,
@@ -99,6 +103,7 @@ export function SettingsPagePanel({
           providers={(Object.keys(providerLabelMap)).map((id) => ({id, label: providerLabelMap[id]})) as any}
           baseUrl={activeProviderDraft?.baseUrl ?? ''}
           apiKey={activeProviderApiKey}
+          hasApiKeyConfigured={hasApiKeyConfigured}
           llmModel={activeProviderDraft?.llmModel ?? ''}
           embeddingModel={activeProviderDraft?.embeddingModel ?? ''}
           stateText={providerMarker.text}
@@ -134,6 +139,7 @@ export function SettingsPagePanel({
             documentStatsText={docsStorageStatsText}
             vectorHint={vectorStorageHint}
             documentHint={documentStorageHint}
+            storageLocked={storageLocked}
           />
         </div>
       </SettingsLayout>

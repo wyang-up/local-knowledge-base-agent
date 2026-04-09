@@ -18,11 +18,21 @@ describe('document-preview-content parseSingleRangeHeader', () => {
     expect(parseSingleRangeHeader('bytes=10-20', 100)).toEqual({ start: 10, end: 20 });
   });
 
+  it('parses an open-ended byte range', () => {
+    expect(parseSingleRangeHeader('bytes=0-', 100)).toEqual({ start: 0, end: 99 });
+    expect(parseSingleRangeHeader('bytes=10-', 100)).toEqual({ start: 10, end: 99 });
+  });
+
+  it('parses a suffix byte range', () => {
+    expect(parseSingleRangeHeader('bytes=-10', 100)).toEqual({ start: 90, end: 99 });
+    expect(parseSingleRangeHeader('bytes=-200', 100)).toEqual({ start: 0, end: 99 });
+  });
+
   it('returns invalid for malformed range values', () => {
     expect(parseSingleRangeHeader('', 100)).toBe('invalid');
     expect(parseSingleRangeHeader('bytes=10', 100)).toBe('invalid');
-    expect(parseSingleRangeHeader('bytes=10-', 100)).toBe('invalid');
-    expect(parseSingleRangeHeader('bytes=-10', 100)).toBe('invalid');
+    expect(parseSingleRangeHeader('bytes=-0', 100)).toBe('invalid');
+    expect(parseSingleRangeHeader('bytes=abc-def', 100)).toBe('invalid');
     expect(parseSingleRangeHeader('bytes=1-2,3-4', 100)).toBe('invalid');
     expect(parseSingleRangeHeader('items=1-2', 100)).toBe('invalid');
   });
@@ -31,6 +41,7 @@ describe('document-preview-content parseSingleRangeHeader', () => {
     expect(parseSingleRangeHeader('bytes=50-40', 100)).toBe('invalid');
     expect(parseSingleRangeHeader('bytes=0-100', 100)).toBe('invalid');
     expect(parseSingleRangeHeader('bytes=100-100', 100)).toBe('invalid');
+    expect(parseSingleRangeHeader('bytes=100-', 100)).toBe('invalid');
     expect(parseSingleRangeHeader('bytes=0-0', 0)).toBe('invalid');
   });
 });
@@ -56,6 +67,19 @@ describe('document-preview-content buildPreviewResponsePlan', () => {
         'Content-Length': '10',
       },
       range: { start: 10, end: 19 },
+    });
+  });
+
+  it('builds 206 response for open-ended range', () => {
+    const plan = buildPreviewResponsePlan('bytes=0-', 100);
+    expect(plan).toEqual({
+      status: 206,
+      headers: {
+        'Accept-Ranges': 'bytes',
+        'Content-Range': 'bytes 0-99/100',
+        'Content-Length': '100',
+      },
+      range: { start: 0, end: 99 },
     });
   });
 

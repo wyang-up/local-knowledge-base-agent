@@ -103,4 +103,50 @@ describe('PreviewModal', () => {
     expect(screen.getByText(/上传时间:/)).toBeInTheDocument();
     expect(screen.getByText('分块数: 8')).toBeInTheDocument();
   });
+
+  it('uses A4-like width preset when configured', () => {
+    render(
+      <PreviewModal
+        open
+        fileName="测试文档.pdf"
+        size={1024}
+        type=".pdf"
+        uploadTime="2026-04-01T08:00:00.000Z"
+        chunkCount={8}
+        onClose={vi.fn()}
+        sizePreset="a4"
+        viewportPreset="a4"
+      >
+        <div>内容</div>
+      </PreviewModal>,
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.className).toContain('max-w-[900px]');
+    expect(dialog.className).toContain('w-[95vw]');
+    expect(dialog.className).toContain('h-[calc(100vh-2rem)]');
+    expect(dialog.className).toContain('max-h-[calc(100vh-2rem)]');
+  });
+
+  it('removes content padding when configured to none', () => {
+    render(
+      <PreviewModal
+        open
+        fileName="测试文档.txt"
+        size={256}
+        type=".txt"
+        uploadTime="2026-04-01T08:00:00.000Z"
+        chunkCount={2}
+        onClose={vi.fn()}
+        contentPadding="none"
+      >
+        <div data-testid="preview-inner-content">内容</div>
+      </PreviewModal>,
+    );
+
+    const content = screen.getByTestId('preview-inner-content').parentElement;
+    expect(content).toBeTruthy();
+    expect(content?.className).not.toContain('px-4');
+    expect(content?.className).not.toContain('py-3');
+  });
 });

@@ -1,4 +1,5 @@
 import {useEffect, useMemo, useRef, useState, type KeyboardEvent} from 'react';
+import type {SourceHighlightTarget} from '../source-highlight-target';
 
 export type TablePreviewSheet = {
   id: string;
@@ -11,6 +12,9 @@ type TablePreviewProps = {
   sheets: TablePreviewSheet[];
   isPartialPreview?: boolean;
   errorMessage?: string;
+  sourceHighlight?: SourceHighlightTarget | null;
+  onSourceBlockClick?: () => void;
+  onSourceBlockAuxClick?: () => void;
 };
 
 function getColumnCount(sheet: TablePreviewSheet): number {
@@ -31,16 +35,88 @@ function normalizeCellValue(value: string | number | null | undefined): string {
   return String(value);
 }
 
-export function TablePreview({sheets, isPartialPreview = false, errorMessage}: TablePreviewProps) {
+function normalizeSearchText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function rowMatchesSource(row: Array<string | number | null | undefined>, source: string): boolean {
+  const keyword = normalizeSearchText(source);
+  if (!keyword) {
+    return false;
+  }
+
+  const cells = row.map((cell) => normalizeSearchText(normalizeCellValue(cell))).filter(Boolean);
+  const rowText = cells.join(' ');
+  if (rowText && (rowText.includes(keyword) || keyword.includes(rowText))) {
+    return true;
+  }
+
+  return cells.some((cell) => cell && (cell.includes(keyword) || keyword.includes(cell)));
+}
+
+export function TablePreview({sheets, isPartialPreview = false, errorMessage, sourceHighlight = null, onSourceBlockClick, onSourceBlockAuxClick}: TablePreviewProps) {
   const [activeSheetIndex, setActiveSheetIndex] = useState(0);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const activeSheetIdRef = useRef<string | null>(null);
+  const highlightedRowRef = useRef<HTMLTableRowElement | null>(null);
+
+  const sourceKeyword = sourceHighlight?.content?.trim() || '';
+  const preferredSheetId = sourceHighlight?.sheetId?.trim() || '';
+  const preferredSheetName = sourceHighlight?.sheetName?.trim() || '';
 
   useEffect(() => {
-    setActiveSheetIndex(0);
-  }, [sheets]);
+    setActiveSheetIndex(() => {
+      if (sheets.length === 0) {
+        activeSheetIdRef.current = null;
+        return 0;
+      }
+
+      if (preferredSheetId) {
+        const matchedIndex = sheets.findIndex((sheet) => sheet.id === preferredSheetId);
+        if (matchedIndex >= 0) {
+          return matchedIndex;
+        }
+      }
+
+      if (preferredSheetName) {
+        const matchedIndex = sheets.findIndex((sheet) => sheet.name === preferredSheetName);
+        if (matchedIndex >= 0) {
+          return matchedIndex;
+        }
+      }
+
+      const normalizedKeyword = normalizeSearchText(sourceKeyword);
+      if (normalizedKeyword) {
+        const matchedIndex = sheets.findIndex((sheet) => sheet.rows.some((row) => rowMatchesSource(row, normalizedKeyword)));
+        if (matchedIndex >= 0) {
+          return matchedIndex;
+        }
+      }
+
+      if (activeSheetIdRef.current) {
+        const matchedIndex = sheets.findIndex((sheet) => sheet.id === activeSheetIdRef.current);
+        if (matchedIndex >= 0) {
+          return matchedIndex;
+        }
+      }
+
+      return 0;
+    });
+  }, [sheets, sourceKeyword, preferredSheetId, preferredSheetName]);
 
   const activeSheet = sheets[activeSheetIndex] ?? null;
   const headers = useMemo(() => (activeSheet ? buildColumns(activeSheet) : []), [activeSheet]);
+
+  useEffect(() => {
+    activeSheetIdRef.current = activeSheet?.id ?? null;
+  }, [activeSheet?.id]);
+
+  useEffect(() => {
+    if (!highlightedRowRef.current || typeof highlightedRowRef.current.scrollIntoView !== 'function') {
+      return;
+    }
+    highlightedRowRef.current.scrollIntoView({behavior: 'smooth', block: 'start'});
+  }, [activeSheetIndex, sourceKeyword]);
 
   const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, currentIndex: number) => {
     if (sheets.length < 2) {
@@ -71,10 +147,31 @@ export function TablePreview({sheets, isPartialPreview = false, errorMessage}: T
     return <p data-testid="table-preview-empty">暂无表格可预览。</p>;
   }
 
+  const highlightedRowRange = (() => {
+    if (typeof sourceHighlight?.rowStart === 'number') {
+      const start = sourceHighlight.rowStart;
+      const end = typeof sourceHighlight.rowEnd === 'number' ? sourceHighlight.rowEnd : start;
+      return {start, end};
+    }
+
+    if (sourceKeyword) {
+      const matchedIndex = activeSheet.rows.findIndex((row) => rowMatchesSource(row, sourceKeyword));
+      if (matchedIndex >= 0) {
+        return {start: matchedIndex, end: matchedIndex};
+      }
+    }
+
+    return null;
+  })();
+
   return (
     <section data-testid="table-preview-renderer">
       {sheets.length > 1 ? (
-        <div role="tablist" aria-label="工作表切换">
+        <div
+          role="tablist"
+          aria-label="工作表切换"
+          className="flex items-center gap-2 rounded-[8px] bg-[#e6f0ff] px-4 py-2 border-b border-[#1677FF]"
+        >
           {sheets.map((sheet, index) => (
             <button
               key={sheet.id}
@@ -89,6 +186,11 @@ export function TablePreview({sheets, isPartialPreview = false, errorMessage}: T
               }}
               onKeyDown={(event) => handleTabKeyDown(event, index)}
               onClick={() => setActiveSheetIndex(index)}
+              className={`rounded-[8px] border px-4 py-1.5 text-sm transition-all active:scale-[0.98] ${
+                index === activeSheetIndex
+                  ? 'border-[#1677FF] bg-[#1677FF] text-white'
+                  : 'border-[#1677FF] bg-transparent text-[#333333] hover:bg-[#e6f0ff]'
+              }`}
             >
               {sheet.name}
             </button>
@@ -117,7 +219,17 @@ export function TablePreview({sheets, isPartialPreview = false, errorMessage}: T
           </thead>
           <tbody>
             {activeSheet.rows.map((row, rowIndex) => (
-              <tr key={`${activeSheet.id}-row-${rowIndex}`}>
+              <tr
+                key={`${activeSheet.id}-row-${rowIndex}`}
+                ref={(node) => {
+                  if (highlightedRowRange && rowIndex === highlightedRowRange.start) {
+                    highlightedRowRef.current = node;
+                  }
+                }}
+                data-testid={highlightedRowRange && rowIndex >= highlightedRowRange.start && rowIndex <= highlightedRowRange.end ? 'table-preview-source-highlight-row' : undefined}
+                className={highlightedRowRange && rowIndex >= highlightedRowRange.start && rowIndex <= highlightedRowRange.end ? 'bg-[#FFF7CC] cursor-pointer' : undefined}
+                onClick={highlightedRowRange && rowIndex >= highlightedRowRange.start && rowIndex <= highlightedRowRange.end ? onSourceBlockClick : undefined}
+              >
                 {headers.map((_, cellIndex) => (
                   <td key={`${activeSheet.id}-cell-${rowIndex}-${cellIndex}`}>{normalizeCellValue(row[cellIndex])}</td>
                 ))}
@@ -127,6 +239,19 @@ export function TablePreview({sheets, isPartialPreview = false, errorMessage}: T
           </table>
         </div>
       </div>
+
+      {highlightedRowRange && onSourceBlockAuxClick ? (
+        <div className="mt-2">
+          <button
+            type="button"
+            data-testid="table-preview-source-highlight-back-to-qa"
+            onClick={onSourceBlockAuxClick}
+            className="rounded-[8px] border border-[#1677FF]/35 px-2 py-1 text-xs text-[#1677FF] hover:bg-blue-50"
+          >
+            返回AI回答
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }

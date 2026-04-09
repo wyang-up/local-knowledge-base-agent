@@ -42,8 +42,8 @@ const PORT = Number(process.env.PORT || 8080);
 const DATA_DIR = process.env.DATA_DIR || path.join(PROJECT_ROOT, 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const DB_PATH = path.join(DATA_DIR, 'kb.db');
-const CONFIGURED_LANCE_PATH = process.env.LANCE_PATH || path.join(DATA_DIR, 'lance');
-const LANCE_FALLBACK_PATH = process.env.LANCE_FALLBACK_PATH || '/tmp/local-knowledge-base-agent-lance';
+const CONFIGURED_LANCE_PATH = path.join(DATA_DIR, 'lance');
+const LANCE_FALLBACK_PATH = '/tmp/local-knowledge-base-agent-lance';
 const LANCE_PATH = resolveLancePath(CONFIGURED_LANCE_PATH, LANCE_FALLBACK_PATH);
 const ARTIFACTS_PATH = path.join(DATA_DIR, 'pipeline-artifacts');
 const SILICONFLOW_TIMEOUT_MS = Number(process.env.SILICONFLOW_TIMEOUT_MS || 20000);
@@ -221,10 +221,30 @@ function isPreviewTypeSupported(docType: unknown) {
     || normalized === '.xls'
     || normalized === '.xlsx'
     || normalized === '.json'
+    || normalized === '.docx'
     || normalized === '.txt'
     || normalized === '.md'
     || normalized === '.markdown'
     || normalized === '.log';
+}
+
+function resolvePreviewContentType(docType: unknown): string {
+  if (typeof docType !== 'string') {
+    return 'application/octet-stream';
+  }
+
+  const normalized = docType.trim().toLowerCase();
+  if (normalized === '.pdf') return 'application/pdf';
+  if (normalized === '.csv') return 'text/csv; charset=utf-8';
+  if (normalized === '.tsv') return 'text/tab-separated-values; charset=utf-8';
+  if (normalized === '.xls') return 'application/vnd.ms-excel';
+  if (normalized === '.xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (normalized === '.json') return 'application/json; charset=utf-8';
+  if (normalized === '.docx') return 'text/plain; charset=utf-8';
+  if (normalized === '.txt' || normalized === '.md' || normalized === '.markdown' || normalized === '.log') {
+    return 'text/plain; charset=utf-8';
+  }
+  return 'application/octet-stream';
 }
 
 export function registerDocumentPreviewRoutes(app: express.Express, db: any) {
@@ -239,6 +259,12 @@ export function registerDocumentPreviewRoutes(app: express.Express, db: any) {
     }
 
     try {
+      if (String(doc.type).trim().toLowerCase() === '.docx') {
+        const result = await mammoth.extractRawText({ path: doc.filePath });
+        res.setHeader('Content-Type', resolvePreviewContentType(doc.type));
+        return res.status(200).send(result.value || '');
+      }
+
       const fileStat = fs.statSync(doc.filePath);
       const plan = buildPreviewResponsePlan(req.header('range'), fileStat.size);
 
@@ -250,6 +276,8 @@ export function registerDocumentPreviewRoutes(app: express.Express, db: any) {
       if (plan.status === 200) {
         res.setHeader('Content-Length', plan.headers['Content-Length']);
       }
+
+      res.setHeader('Content-Type', resolvePreviewContentType(doc.type));
 
       if (plan.status === 206) {
         res.setHeader('Accept-Ranges', plan.headers['Accept-Ranges']);
@@ -541,8 +569,9 @@ async function startServer() {
   });
   registerDocumentPreviewRoutes(app, db);
   registerSettingsRoutes(app, db, {
-    storagePath: LANCE_PATH,
+    storagePath: CONFIGURED_LANCE_PATH,
     documentStoragePath: UPLOADS_DIR,
+    lockStoragePath: true,
   });
 
   async function writeDocumentStage(docId: string, stage: PipelineStage, patch: Partial<DocumentJobRecord> = {}) {
@@ -913,6 +942,7 @@ async function startServer() {
       filePath: doc.filePath,
       chunkTable,
       clearDocumentData: (documentId) => pipelineStore.clearDocumentData?.(documentId),
+      clearDocumentArtifacts: (documentId) => artifactStore.clearDocumentArtifacts?.(documentId),
       deleteDocumentRow: (documentId) => db.run('DELETE FROM documents WHERE id = ?', documentId),
     });
 
@@ -1249,6 +1279,7 @@ type RegisterSettingsRoutesOptions = {
   storagePath: string;
   documentStoragePath?: string;
   keySecurity?: KeySecurityService;
+  lockStoragePath?: boolean;
 };
 
 function parseImportSchemaVersion(raw: unknown) {
@@ -1319,6 +1350,7 @@ export function registerSettingsRoutes(app: express.Express, db: any, options: R
     storagePath: options.storagePath,
     documentStoragePath: options.documentStoragePath ?? options.storagePath,
     keySecurity: options.keySecurity,
+    lockStoragePath: options.lockStoragePath,
     getRuntimeConfig,
   });
 
@@ -1459,6 +1491,20 @@ export function registerSettingsRoutes(app: express.Express, db: any, options: R
 
       const storagePatch = req.body?.storagePatch;
       if (storagePatch && typeof storagePatch === 'object') {
+        if (options.lockStoragePath) {
+          for (const field of asFieldList(storagePatch, 'storage')) {
+            if (field === 'expectedVersion') {
+              continue;
+            }
+            failedItems.push({
+              module: 'storage',
+              field,
+              code: 'STORAGE_PATH_LOCKED',
+              requestId: audit.requestId,
+            });
+          }
+          warnings.push('storage path is locked to project data/lance and cannot be changed');
+        } else {
         const candidateVersion = resolveExpectedVersion(storagePatch.expectedVersion, req.body?.expectedVersions?.storage);
 
         if (typeof candidateVersion !== 'number') {
@@ -1495,6 +1541,7 @@ export function registerSettingsRoutes(app: express.Express, db: any, options: R
               });
             }
           }
+        }
         }
       }
 

@@ -194,7 +194,19 @@ describe('App', () => {
       if (url.includes('/api/config/all')) {
         return new Response(JSON.stringify({
           ui: { language: 'zh', theme: 'light' },
-          providers: [],
+          providers: [
+            {
+              providerId: 'siliconflow',
+              version: 1,
+              baseUrl: 'https://api.siliconflow.cn/v1',
+              llmModel: 'deepseek-ai/DeepSeek-V3',
+              embeddingModel: 'BAAI/bge-m3',
+              hasKey: true,
+              maskedKey: 'sk-***',
+              updatedAt: '2026-04-01T10:00:00.000Z',
+              lastModelSyncAt: null,
+            },
+          ],
           storage: {
             version: 1,
             storagePath: './data/lance',
@@ -356,7 +368,7 @@ describe('App', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByText('问答'));
+    await user.click(await screen.findByRole('button', {name: '问答'}));
     await screen.findByText('上传附件');
 
     const qaInput = screen.getByTestId('qa-upload-input') as HTMLInputElement;
@@ -400,7 +412,7 @@ describe('App', () => {
     }));
 
     render(<App />);
-    await user.click(await screen.findByText('问答'));
+    await user.click(await screen.findByRole('button', {name: '问答'}));
 
     const searchInput = await screen.findByPlaceholderText('搜索会话或内容');
     await user.type(searchInput, '预算');
@@ -540,6 +552,44 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(scrollContainer.scrollTop).toBe(180);
+    });
+  });
+
+  it('restores qa scroll position when switching away and back', async () => {
+    const user = userEvent.setup();
+    localStorage.setItem(QA_STORAGE_KEY, JSON.stringify({
+      activeConversationId: 'conv-scroll',
+      conversations: [
+        {
+          id: 'conv-scroll',
+          title: '滚动测试',
+          updatedAt: '2026-04-03T10:00:00.000Z',
+          pinned: false,
+          archived: false,
+          tags: [],
+          messages: Array.from({length: 12}).map((_, index) => ({
+            id: `m-${index}`,
+            role: index % 2 === 0 ? 'user' : 'assistant',
+            content: `消息 ${index + 1}`,
+            timestamp: `2026-04-03T10:${String(index).padStart(2, '0')}:00.000Z`,
+          })),
+        },
+      ],
+    }));
+
+    render(<App />);
+
+    await user.click(await screen.findByText('问答'));
+    const qaScroll = document.querySelector('[data-testid="qa-page-surface"] .overflow-y-auto.p-6.space-y-6') as HTMLDivElement;
+    expect(qaScroll).toBeTruthy();
+    qaScroll.scrollTop = 220;
+    fireEvent.scroll(qaScroll);
+
+    await user.click(screen.getByRole('button', { name: /文档|Docs/ }));
+    await user.click(screen.getByRole('button', { name: /问答|Q&A/ }));
+
+    await waitFor(() => {
+      expect(qaScroll.scrollTop).toBe(220);
     });
   });
 
@@ -1800,6 +1850,70 @@ describe('App', () => {
     expect((await screen.findAllByText('API Key 已复制')).length).toBeGreaterThan(0);
   });
 
+  it('shows masked hint when api key is configured but hidden', async () => {
+    const user = userEvent.setup();
+    const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+    const baseImplementation = fetchMock.getMockImplementation() as
+      | ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>)
+      | undefined;
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.includes('/api/config/model')) {
+        return new Response(JSON.stringify({
+          baseUrl: 'https://api.siliconflow.cn/v1',
+          embeddingModel: 'BAAI/bge-m3',
+          llmModel: 'deepseek-ai/DeepSeek-V3',
+          storagePath: './data/lance',
+          documentStoragePath: './data/uploads',
+          readOnly: true,
+          storagePathLocked: true,
+          hasApiKey: true,
+        }), {status: 200});
+      }
+      if (url.includes('/api/config/all')) {
+        return new Response(JSON.stringify({
+          ui: { language: 'zh', theme: 'light' },
+          providers: [
+            {
+              providerId: 'siliconflow',
+              version: 1,
+              baseUrl: 'https://api.siliconflow.cn/v1',
+              llmModel: 'deepseek-ai/DeepSeek-V3',
+              embeddingModel: 'BAAI/bge-m3',
+              hasKey: true,
+              maskedKey: 'sk-***',
+              updatedAt: '2026-04-01T10:00:00.000Z',
+              lastModelSyncAt: null,
+            },
+          ],
+          storage: {
+            version: 1,
+            storagePath: './data/lance',
+            documentStoragePath: './data/uploads',
+            platform: 'win32',
+            cacheSizeBytes: 2048,
+            freeSpaceBytes: 8 * 1024 * 1024,
+            updatedAt: '2026-04-01T10:00:00.000Z',
+          },
+        }), { status: 200 });
+      }
+
+      if (!baseImplementation) {
+        throw new Error(`Missing base fetch mock: ${init?.method || 'GET'} ${url}`);
+      }
+      return baseImplementation(input, init);
+    });
+
+    render(<App />);
+
+    await user.click(await screen.findByText('设置'));
+
+    const apiKeyInput = screen.getByLabelText('API Key') as HTMLInputElement;
+    expect(apiKeyInput).toHaveAttribute('type', 'password');
+    expect(apiKeyInput).toHaveAttribute('placeholder', '••••••••（已配置）');
+  });
+
   it('bridges storage open/clear actions and displays stats', async () => {
     const user = userEvent.setup();
     const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
@@ -1850,6 +1964,89 @@ describe('App', () => {
       expect(openDocsCall).toBeTruthy();
       expect(hasRequiredSettingsHeaders(openDocsCall?.[1] as RequestInit)).toBe(true);
     });
+  });
+
+  it('disables storage path editing controls when backend marks config readOnly', async () => {
+    const user = userEvent.setup();
+    const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.includes('/api/config/model')) {
+        return new Response(JSON.stringify({
+          baseUrl: 'https://api.siliconflow.cn/v1',
+          embeddingModel: 'BAAI/bge-m3',
+          llmModel: 'deepseek-ai/DeepSeek-V3',
+          storagePath: './data/lance',
+          documentStoragePath: './data/uploads',
+          readOnly: true,
+          storagePathLocked: true,
+          hasApiKey: true,
+        }), {status: 200});
+      }
+      if (url.includes('/api/settings/auth/bootstrap')) {
+        return new Response(JSON.stringify({sessionToken: 'session', csrfToken: 'csrf'}), {status: 200});
+      }
+      if (url.includes('/api/config/all') && hasRequiredSettingsHeaders(init)) {
+        return new Response(JSON.stringify({
+          ui: {language: 'zh', theme: 'light'},
+          providers: [
+            {
+              providerId: 'siliconflow',
+              version: 1,
+              baseUrl: 'https://api.siliconflow.cn/v1',
+              llmModel: 'deepseek-ai/DeepSeek-V3',
+              embeddingModel: 'BAAI/bge-m3',
+              hasKey: true,
+              maskedKey: 'sk-***',
+              updatedAt: '2026-04-06T00:00:00.000Z',
+              lastModelSyncAt: null,
+            },
+          ],
+          storage: {
+            version: 1,
+            storagePath: './data/lance',
+            documentStoragePath: './data/uploads',
+            platform: 'linux',
+            cacheSizeBytes: 0,
+            freeSpaceBytes: 0,
+            updatedAt: '2026-04-06T00:00:00.000Z',
+          },
+        }), {status: 200});
+      }
+      if (url.includes('/api/config/provider/siliconflow/models')) {
+        return new Response(JSON.stringify({models: []}), {status: 200});
+      }
+      if (url.includes('/api/storage/open') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ success: true, openedInSystem: false, openedPath: './data/lance', stats: {cacheSizeBytes: 0, freeSpaceBytes: 0} }), {status: 200});
+      }
+      if (url.includes('/api/storage/docs/open') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ success: true, openedInSystem: false, openedPath: './data/uploads', stats: {cacheSizeBytes: 0, freeSpaceBytes: 0} }), {status: 200});
+      }
+      if (url.includes('/api/storage/cache/clear') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ success: true, reclaimedBytes: 0, stats: {cacheSizeBytes: 0, freeSpaceBytes: 0} }), {status: 200});
+      }
+      if (url.includes('/api/documents')) {
+        return new Response(JSON.stringify([]), {status: 200});
+      }
+      if (url.includes('/api/chat') || url.includes('/api/mcp')) {
+        return new Response(JSON.stringify({content: 'ok', sources: []}), {status: 200});
+      }
+
+      throw new Error(`Unhandled fetch mock in readOnly storage test: ${init?.method || 'GET'} ${url}`);
+    });
+
+    render(<App />);
+    await user.click(await screen.findByText('设置'));
+
+    const vectorSection = await screen.findByTestId('settings-card-storage-vector');
+    const docsSection = await screen.findByTestId('settings-card-storage-docs');
+
+    expect(within(vectorSection).getByLabelText('存储路径')).toBeDisabled();
+    expect(within(docsSection).getByLabelText('文档目录路径')).toBeDisabled();
+
+    expect(within(vectorSection).getByRole('button', {name: '选择目录'})).toBeDisabled();
+    expect(within(docsSection).getByRole('button', {name: '选择目录'})).toBeDisabled();
   });
 
   it('preserves user edits when delayed model config hydration resolves', async () => {
@@ -2032,7 +2229,7 @@ describe('App', () => {
     expect((await screen.findAllByText('清理向量缓存失败，请稍后重试。')).length).toBeGreaterThan(0);
   });
 
-  it('jumps to document detail and highlights chunk when source item clicked', async () => {
+  it('opens document preview when source item clicked in qa', async () => {
     const user = userEvent.setup();
     const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
 
@@ -2076,9 +2273,18 @@ describe('App', () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
 
-      if (url.includes('/api/documents/doc-1')) {
-        return new Response(JSON.stringify(detailResponse), { status: 200 });
-      }
+    if (url.includes('/api/documents/doc-1/content')) {
+      return new Response(new Uint8Array([37, 80, 68, 70]), {
+        status: 200,
+        headers: {'Content-Type': 'application/pdf'},
+      });
+    }
+    if (url.includes('/api/documents/doc-1')) {
+      return new Response(JSON.stringify(detailResponse), { status: 200 });
+    }
+    if (url.includes('/api/settings/preview-flags')) {
+      return new Response(JSON.stringify({enableNewPreviewModal: true, enableNewPreviewByType: {pdf: true}}), {status: 200});
+    }
       if (url.includes('/api/documents')) {
         return new Response(JSON.stringify(documentsResponse), { status: 200 });
       }
@@ -2128,9 +2334,127 @@ describe('App', () => {
     await user.click(await screen.findByText('问答'));
 
     await user.click(await screen.findByRole('button', {name: '展开溯源'}));
-    await user.click(await screen.findByRole('button', {name: '失败文档.pdf - 第1分块'}));
+    await user.click(await screen.findByRole('button', {name: '失败文档.pdf-第1分块'}));
 
-    expect(await screen.findByText('目录大纲')).toBeInTheDocument();
-    expect(screen.getByTestId('detail-chunk-chunk-1').className).toContain('ring-2');
+    expect(screen.queryByText('目录大纲')).not.toBeInTheDocument();
+  });
+
+  it('cleans qa source references after document deletion', async () => {
+    const user = userEvent.setup();
+    const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+
+    window.localStorage.setItem(QA_STORAGE_KEY, JSON.stringify({
+      activeConversationId: 'conv-roundtrip',
+      conversations: [
+        {
+          id: 'conv-roundtrip',
+          title: '闭环测试',
+          updatedAt: '2026-04-03T10:00:00.000Z',
+          pinned: false,
+          archived: false,
+          tags: [],
+          messages: [
+            {
+              id: 'm-user',
+              role: 'user',
+              content: '定位测试',
+              timestamp: '2026-04-03T10:00:00.000Z',
+            },
+            {
+              id: 'm-assistant',
+              role: 'assistant',
+              content: '这是回答',
+              timestamp: '2026-04-03T10:00:01.000Z',
+              sources: [
+                {
+                  docId: 'doc-1',
+                  chunkId: 'chunk-1',
+                  chunkIndex: 0,
+                  docName: '失败文档.pdf',
+                  content: '预览内容',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }));
+
+    let documentsPayload = [...documentsResponse];
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+
+      if (url.includes('/api/documents/doc-1/content')) {
+        return new Response(new Uint8Array([37, 80, 68, 70]), {
+          status: 200,
+          headers: {'Content-Type': 'application/pdf'},
+        });
+      }
+      if (url.includes('/api/documents/doc-1') && init?.method === 'DELETE') {
+        documentsPayload = documentsPayload.filter((doc) => doc.id !== 'doc-1');
+        return new Response(JSON.stringify({success: true}), {status: 200});
+      }
+      if (url.includes('/api/documents/doc-1')) {
+        return new Response(JSON.stringify(detailResponse), { status: 200 });
+      }
+      if (url.includes('/api/settings/preview-flags')) {
+        return new Response(JSON.stringify({enableNewPreviewModal: true, enableNewPreviewByType: {pdf: true}}), {status: 200});
+      }
+      if (url.includes('/api/documents')) {
+        return new Response(JSON.stringify(documentsPayload), { status: 200 });
+      }
+      if (url.includes('/api/config/model')) {
+        return new Response(JSON.stringify({
+          baseUrl: 'https://api.siliconflow.cn/v1',
+          embeddingModel: 'BAAI/bge-m3',
+          llmModel: 'deepseek-ai/DeepSeek-V3',
+          storagePath: './data/lance',
+          documentStoragePath: './data/uploads',
+          readOnly: true,
+          hasApiKey: false,
+        }), { status: 200 });
+      }
+      if (/\/api\/config\/provider\/.+\/models/.test(url)) {
+        return new Response(JSON.stringify({ models: [] }), { status: 200 });
+      }
+      if (url.includes('/api/config/all')) {
+        return new Response(JSON.stringify({
+          ui: { language: 'zh', theme: 'light' },
+          providers: [],
+          storage: {
+            version: 1,
+            storagePath: './data/lance',
+            documentStoragePath: './data/uploads',
+            platform: 'win32',
+            cacheSizeBytes: 0,
+            freeSpaceBytes: 0,
+            updatedAt: '2026-04-01T10:00:00.000Z',
+          },
+        }), { status: 200 });
+      }
+      if (url.includes('/api/settings/auth/bootstrap') && init?.method === 'GET') {
+        return new Response(JSON.stringify({
+          sessionToken: BOOTSTRAP_SESSION_TOKEN,
+          csrfToken: BOOTSTRAP_CSRF_TOKEN,
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unhandled fetch mock in roundtrip test: ${init?.method || 'GET'} ${url}`);
+    });
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+
+    render(<App />);
+    await user.click(await screen.findByText('问答'));
+    await user.click(await screen.findByRole('button', {name: '展开溯源'}));
+    expect(await screen.findByRole('button', {name: '失败文档.pdf-第1分块'})).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', {name: '文档库'}));
+    await user.click(await screen.findByRole('button', {name: '删除'}));
+    await user.click(screen.getByRole('button', {name: '问答'}));
+    expect(screen.queryByRole('button', {name: '失败文档.pdf-第1分块'})).not.toBeInTheDocument();
+    expect(alertSpy).not.toHaveBeenCalled();
   });
 });

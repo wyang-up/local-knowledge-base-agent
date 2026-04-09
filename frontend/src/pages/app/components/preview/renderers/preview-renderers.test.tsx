@@ -1,95 +1,80 @@
-import {fireEvent, render, screen} from '@testing-library/react';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {JsonPreview} from './JsonPreview';
 import {PdfPreview} from './PdfPreview';
 import {TablePreview} from './TablePreview';
 import {TextPreview} from './TextPreview';
 
+const {mockPdfGetDocument} = vi.hoisted(() => ({
+  mockPdfGetDocument: vi.fn(),
+}));
+
+vi.mock('pdfjs-dist', () => ({
+  GlobalWorkerOptions: {
+    workerSrc: '',
+  },
+  getDocument: mockPdfGetDocument,
+}));
+
 describe('pdf preview renderer', () => {
-  it('renders pdf viewer with basic controls', () => {
+  beforeEach(() => {
+    mockPdfGetDocument.mockReset();
+    const renderMock = vi.fn(() => ({promise: Promise.resolve()}));
+    mockPdfGetDocument.mockReturnValue({
+      promise: Promise.resolve({
+        numPages: 3,
+        getPage: async (pageNumber: number) => ({
+          getViewport: () => ({width: 600, height: 800}),
+          getTextContent: async () => ({
+            items: pageNumber === 2
+              ? [{str: '这里是目标朔源内容片段', transform: [1, 0, 0, 1, 0, 280]}]
+              : [{str: '其他页面内容', transform: [1, 0, 0, 1, 0, 760]}],
+          }),
+          render: renderMock,
+        }),
+      }),
+    });
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({chunks: []}), {
+        status: 200,
+        headers: {'Content-Type': 'application/json'},
+      }),
+    );
+  });
+
+  it('renders original-style pdf pages without iframe toolbar viewer', async () => {
     render(<PdfPreview src="blob:https://example.com/mock-pdf" />);
 
-    expect(screen.getByRole('button', {name: '上一页'})).toBeInTheDocument();
-    expect(screen.getByRole('button', {name: '下一页'})).toBeInTheDocument();
-    expect(screen.getByLabelText('页码')).toBeInTheDocument();
-    expect(screen.getByRole('button', {name: '缩小'})).toBeInTheDocument();
-    expect(screen.getByRole('button', {name: '放大'})).toBeInTheDocument();
-    expect(screen.getByTitle('PDF 预览内容')).toBeInTheDocument();
-    expect(screen.getByRole('button', {name: '上一页'})).toBeDisabled();
+    expect(screen.queryByRole('button', {name: '滚动模式'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: '分页模式'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: '适配页宽'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: '复制文本'})).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('全文搜索')).not.toBeInTheDocument();
+    const iframe = await screen.findByTitle('PDF 预览内容');
+    expect(iframe).toBeInTheDocument();
+    expect(screen.queryByTestId('pdf-preview-pages')).not.toBeInTheDocument();
   });
 
-  it('keeps page unchanged for invalid page input', () => {
+  it('uses full-height layout to avoid blank area below pdf viewer', async () => {
     render(<PdfPreview src="blob:https://example.com/mock-pdf" />);
 
-    const pageInput = screen.getByLabelText('页码') as HTMLInputElement;
-    fireEvent.change(pageInput, {target: {value: '3'}});
-    expect(pageInput).toHaveValue(3);
+    const sections = screen.getAllByTestId('pdf-preview-renderer');
+    const section = sections[sections.length - 1];
+    const iframes = await screen.findAllByTitle('PDF 预览内容');
+    const iframe = iframes[iframes.length - 1];
 
-    fireEvent.change(pageInput, {target: {value: '0'}});
-    expect(pageInput).toHaveValue(3);
+    expect(section.className).toContain('h-full');
+    expect(section.className).toContain('min-h-0');
+    expect(iframe.className).toContain('flex-1');
+    expect(iframe.className).toContain('min-h-0');
   });
 
-  it('enforces known total pages on next button and manual input', () => {
-    render(<PdfPreview src="blob:https://example.com/mock-pdf" totalPages={2} />);
-
-    const nextButton = screen.getByRole('button', {name: '下一页'});
-    const pageInput = screen.getByLabelText('页码') as HTMLInputElement;
-
-    fireEvent.click(nextButton);
-    expect(pageInput).toHaveValue(2);
-    expect(nextButton).toBeDisabled();
-
-    fireEvent.change(pageInput, {target: {value: '999'}});
-    expect(pageInput).toHaveValue(2);
-  });
-
-  it('enforces zoom lower and upper bounds', () => {
+  it('does not render page controls', () => {
     render(<PdfPreview src="blob:https://example.com/mock-pdf" />);
 
-    const zoomOut = screen.getByRole('button', {name: '缩小'});
-    const zoomIn = screen.getByRole('button', {name: '放大'});
-
-    for (let i = 0; i < 20; i += 1) {
-      fireEvent.click(zoomOut);
-    }
-    expect(screen.getByText('50%')).toBeInTheDocument();
-
-    for (let i = 0; i < 40; i += 1) {
-      fireEvent.click(zoomIn);
-    }
-    expect(screen.getByText('300%')).toBeInTheDocument();
-  });
-
-  it('updates iframe src when page or zoom changes', () => {
-    const src = 'blob:https://example.com/mock-pdf';
-    render(<PdfPreview src={src} />);
-
-    const iframe = screen.getByTitle('PDF 预览内容') as HTMLIFrameElement;
-    expect(iframe.getAttribute('src')).toBe(`${src}#page=1&zoom=100`);
-
-    fireEvent.click(screen.getByRole('button', {name: '下一页'}));
-    expect(iframe.getAttribute('src')).toBe(`${src}#page=2&zoom=100`);
-
-    fireEvent.click(screen.getByRole('button', {name: '放大'}));
-    expect(iframe.getAttribute('src')).toBe(`${src}#page=2&zoom=110`);
-  });
-
-  it('resets page and zoom when src changes', () => {
-    const firstSrc = 'blob:https://example.com/mock-pdf-a';
-    const secondSrc = 'blob:https://example.com/mock-pdf-b';
-    const {rerender} = render(<PdfPreview src={firstSrc} />);
-
-    fireEvent.click(screen.getByRole('button', {name: '下一页'}));
-    fireEvent.click(screen.getByRole('button', {name: '放大'}));
-
-    rerender(<PdfPreview src={secondSrc} />);
-
-    const pageInput = screen.getByLabelText('页码') as HTMLInputElement;
-    const iframe = screen.getByTitle('PDF 预览内容') as HTMLIFrameElement;
-
-    expect(pageInput).toHaveValue(1);
-    expect(screen.getByText('100%')).toBeInTheDocument();
-    expect(iframe.getAttribute('src')).toBe(`${secondSrc}#page=1&zoom=100`);
+    expect(screen.queryByRole('button', {name: '上一页'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: '下一页'})).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('页码')).not.toBeInTheDocument();
   });
 
   it('shows partial preview notice when flagged', () => {
@@ -103,6 +88,46 @@ describe('pdf preview renderer', () => {
 
     expect(screen.getByText('PDF 预览失败，请稍后重试。')).toBeInTheDocument();
     expect(screen.getByText('PDF 加载失败')).toBeInTheDocument();
+  });
+
+  it('renders original-style pdf page surface with overlay highlight', async () => {
+    render(
+      <PdfPreview
+        src="/api/documents/doc-1/content"
+        sourceHighlight={{
+          chunkId: 'chunk-2',
+          chunkIndex: 1,
+          pageStart: 2,
+          textQuote: '这里是目标朔源内容片段',
+          content: '这里是目标朔源内容片段',
+        }}
+      />, 
+    );
+
+    await waitFor(() => {
+      const iframes = screen.getAllByTitle('PDF 预览内容') as HTMLIFrameElement[];
+      const iframe = iframes[iframes.length - 1];
+      const src = iframe.getAttribute('src') ?? '';
+      expect(src).toContain('page=2');
+      expect(src).toContain('search=');
+    });
+  });
+
+  it('renders page-level fallback highlight when page is known but quote is not found', async () => {
+    render(
+      <PdfPreview
+        src="/api/documents/doc-1/content"
+        sourceHighlight={{
+          pageStart: 2,
+          textQuote: '不存在的片段',
+          content: '不存在的片段',
+        }}
+      />,
+    );
+
+    const iframes = await screen.findAllByTitle('PDF 预览内容') as HTMLIFrameElement[];
+    const iframe = iframes[iframes.length - 1];
+    expect(iframe.getAttribute('src')).toContain('page=2');
   });
 });
 
@@ -129,6 +154,28 @@ describe('table preview renderer', () => {
 
     const firstTab = screen.getByRole('tab', {name: 'Sheet 1'});
     const secondTab = screen.getByRole('tab', {name: 'Sheet 2'});
+    const tablist = screen.getByRole('tablist', {name: '工作表切换'});
+
+    expect(tablist.className).toContain('bg-[#e6f0ff]');
+    expect(tablist.className).toContain('border-b');
+    expect(tablist.className).toContain('border-[#1677FF]');
+    expect(tablist.className).toContain('rounded-[8px]');
+    expect(tablist.className).toContain('px-4');
+    expect(tablist.className).toContain('py-2');
+
+    expect(firstTab.className).toContain('rounded-[8px]');
+    expect(firstTab.className).toContain('px-4');
+    expect(firstTab.className).toContain('py-1.5');
+    expect(firstTab.className).toContain('border');
+    expect(firstTab.className).toContain('border-[#1677FF]');
+    expect(firstTab.className).toContain('transition-all');
+    expect(firstTab.className).toContain('active:scale-[0.98]');
+    expect(firstTab.className).toContain('bg-[#1677FF]');
+    expect(firstTab.className).toContain('text-white');
+
+    expect(secondTab.className).toContain('bg-transparent');
+    expect(secondTab.className).toContain('text-[#333333]');
+    expect(secondTab.className).toContain('hover:bg-[#e6f0ff]');
 
     expect(firstTab).toHaveAttribute('aria-selected', 'true');
     expect(firstTab).toHaveAttribute('aria-controls');
@@ -175,6 +222,49 @@ describe('table preview renderer', () => {
     fireEvent.keyDown(secondTab, {key: 'ArrowLeft'});
     expect(firstTab).toHaveAttribute('aria-selected', 'true');
     expect(firstTab).toHaveFocus();
+  });
+
+  it('keeps selected sheet after parent rerender with same sheet ids', () => {
+    const sheets = [
+      {
+        id: 'sheet-1',
+        name: '秋招',
+        columns: ['姓名'],
+        rows: [['张三']],
+      },
+      {
+        id: 'sheet-2',
+        name: '春招',
+        columns: ['姓名'],
+        rows: [['李四']],
+      },
+    ];
+
+    const {rerender} = render(<TablePreview sheets={sheets} />);
+
+    fireEvent.click(screen.getByRole('tab', {name: '春招'}));
+    expect(screen.getByRole('tab', {name: '春招'})).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('cell', {name: '李四'})).toBeInTheDocument();
+
+    const rerenderedSheets = [
+      {
+        id: 'sheet-1',
+        name: '秋招',
+        columns: ['姓名'],
+        rows: [['张三']],
+      },
+      {
+        id: 'sheet-2',
+        name: '春招',
+        columns: ['姓名'],
+        rows: [['李四']],
+      },
+    ];
+
+    rerender(<TablePreview sheets={rerenderedSheets} />);
+
+    expect(screen.getByRole('tab', {name: '春招'})).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('cell', {name: '李四'})).toBeInTheDocument();
   });
 
   it('renders single sheet in csv preview', () => {
@@ -254,39 +344,60 @@ describe('table preview renderer', () => {
     expect(screen.getByRole('cell', {name: 'A2'})).toBeInTheDocument();
     expect(screen.getAllByRole('cell')).toHaveLength(6);
   });
-});
 
-describe('json preview renderer', () => {
-  const originalClipboard = navigator.clipboard;
-
-  afterEach(() => {
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: originalClipboard,
-    });
-  });
-
-  it('renders tree structure and supports collapse/expand', () => {
+  it('switches to matched sheet and highlights matched row for source snippet', () => {
     render(
-      <JsonPreview
-        value={{
-          profile: {
-            name: 'Alice',
-            age: 20,
+      <TablePreview
+        sourceHighlight={{content: '李四'}}
+        sheets={[
+          {
+            id: 'sheet-1',
+            name: '秋招',
+            columns: ['姓名'],
+            rows: [['张三']],
           },
-          tags: ['admin'],
-        }}
+          {
+            id: 'sheet-2',
+            name: '春招',
+            columns: ['姓名'],
+            rows: [['李四']],
+          },
+        ]}
       />,
     );
 
-    expect(screen.getByText('profile')).toBeInTheDocument();
-    expect(screen.queryByText('name')).not.toBeInTheDocument();
+    return waitFor(() => {
+      expect(screen.getByRole('tab', {name: '春招'})).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByTestId('table-preview-source-highlight-row')).toBeInTheDocument();
+      expect(screen.getByRole('cell', {name: '李四'})).toBeInTheDocument();
+    });
+  });
 
-    fireEvent.click(screen.getByRole('button', {name: '展开 profile'}));
-    expect(screen.getByText('name')).toBeInTheDocument();
+  it('highlights matched row range block inside selected sheet', () => {
+    render(
+      <TablePreview
+        sheets={[
+          {id: 'sheet-1', name: 'Sheet 1', columns: ['姓名'], rows: [['张三'], ['李四'], ['王五']]},
+        ]}
+        sourceHighlight={{sheetId: 'sheet-1', rowStart: 1, rowEnd: 2, content: '李四 王五'}}
+      />,
+    );
 
-    fireEvent.click(screen.getByRole('button', {name: '折叠 profile'}));
-    expect(screen.queryByText('name')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('table-preview-source-highlight-row')).toHaveLength(2);
+  });
+});
+
+describe('json preview renderer', () => {
+  it('renders raw json text content', () => {
+    render(
+      <JsonPreview
+        value={'{"profile":{"name":"Alice","age":20},"tags":["admin"]}'}
+      />,
+    );
+
+    expect(screen.getByTestId('json-preview-content')).toHaveTextContent('"profile"');
+    expect(screen.getByTestId('json-preview-content')).toHaveTextContent('"Alice"');
+    expect(screen.queryByRole('button', {name: /展开|折叠/})).not.toBeInTheDocument();
   });
 
   it('shows partial preview notice in json renderer', () => {
@@ -302,75 +413,52 @@ describe('json preview renderer', () => {
     expect(screen.getByText('JSON 格式错误，无法解析预览内容。')).toBeInTheDocument();
   });
 
-  it('copies full json when clipboard is available', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: {writeText},
-    });
-
+  it('does not render copy toolbar in json preview', () => {
     render(<JsonPreview value={{name: 'Alice', age: 20}} />);
 
-    fireEvent.click(screen.getByRole('button', {name: '复制全文'}));
-
-    expect(writeText).toHaveBeenCalledWith(`{
-  "name": "Alice",
-  "age": 20
-}`);
-    expect(await screen.findByRole('status')).toHaveTextContent('已复制。');
+    expect(screen.queryByRole('button', {name: '复制全文'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('shows friendly message when clipboard write fails', async () => {
-    const writeText = vi.fn().mockRejectedValue(new Error('denied'));
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: {writeText},
-    });
-
-    render(<JsonPreview value={{name: 'Alice'}} />);
-
-    fireEvent.click(screen.getByRole('button', {name: '复制全文'}));
-
-    expect(writeText).toHaveBeenCalledTimes(1);
-    expect(await screen.findByRole('status')).toHaveTextContent('复制失败，请稍后重试。');
-  });
-
-  it('handles collapse with keys containing dots', () => {
+  it('stringifies object input into readable json text', () => {
     render(
       <JsonPreview
         value={{
-          'user.name': {
-            first: 'Alice',
-          },
-          user: {
-            name: 'Bob',
+          profile: {
+            name: 'Alice',
           },
         }}
       />,
     );
 
-    expect(screen.queryByText('first')).not.toBeInTheDocument();
-    expect(screen.queryByText('Bob')).not.toBeInTheDocument();
+    expect(screen.getByTestId('json-preview-content')).toHaveTextContent('"profile"');
+    expect(screen.getByTestId('json-preview-content')).toHaveTextContent('"Alice"');
+  });
 
-    fireEvent.click(screen.getByRole('button', {name: '展开 user.name'}));
-    expect(screen.getByText('first')).toBeInTheDocument();
-    expect(screen.queryByText('Bob')).not.toBeInTheDocument();
+  it('highlights source snippet inside json preview', () => {
+    render(<JsonPreview value={'{"name":"Alice","city":"Beijing"}'} sourceHighlight={{content: '  "city": "Beijing"'}} />);
 
-    fireEvent.click(screen.getByRole('button', {name: '折叠 user.name'}));
-    expect(screen.queryByText('first')).not.toBeInTheDocument();
+    expect(screen.getByTestId('preview-highlight-block')).toHaveTextContent('"city": "Beijing"');
+  });
+
+  it('renders json source as original-text block highlight', () => {
+    const onBackToQa = vi.fn();
+    render(
+      <JsonPreview
+        value={'{"profile": {\n  "name": "Alice"\n},"tags":["admin"]}'}
+        sourceHighlight={{content: '"profile": {\n  "name": "Alice"\n}'}}
+        onSourceBlockAuxClick={onBackToQa}
+      />,
+    );
+
+    expect(screen.getByTestId('preview-highlight-block')).toBeInTheDocument();
+    expect(screen.getByTestId('json-preview-content')).toHaveTextContent('"profile"');
+    fireEvent.click(screen.getByTestId('json-preview-source-highlight-back-to-qa'));
+    expect(onBackToQa).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('text preview renderer', () => {
-  const originalClipboard = navigator.clipboard;
-
-  afterEach(() => {
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: originalClipboard,
-    });
-  });
-
   it('renders text and supports basic search interaction', () => {
     render(<TextPreview text="hello world\nsecond line" />);
 
@@ -378,62 +466,45 @@ describe('text preview renderer', () => {
 
     const scrollContainer = screen.getByTestId('text-preview-scroll-container');
     expect(scrollContainer).toBeInTheDocument();
-    expect(scrollContainer).toHaveClass('overflow-auto');
-    expect(scrollContainer).toHaveClass('max-h-[480px]');
+    expect(scrollContainer).toHaveClass('overflow-y-auto');
+    expect(scrollContainer).toHaveClass('flex-1');
 
     const content = screen.getByTestId('text-preview-content');
     expect(content).toBeInTheDocument();
     expect(content).toHaveTextContent('hello world');
 
+    const toolbar = screen.getByTestId('text-preview-toolbar');
+    expect(toolbar.className).toContain('bg-[#1677FF]');
+    expect(toolbar.className).toContain('bg-gradient-to-b');
+    expect(toolbar.className).toContain('from-[#1677FF]');
+    expect(toolbar.className).toContain('to-[#1570F0]');
+    expect(toolbar.className).toContain('w-full');
+    expect(toolbar.className).not.toContain('mb-2');
+    expect(toolbar.className).toContain('border-t');
+    expect(toolbar.className).toContain('border-b');
+    expect(toolbar.className).toContain('border-[rgba(255,255,255,0.2)]');
+    expect(toolbar.className).toContain('rounded-b-[8px]');
+    expect(toolbar.className).toContain('px-4');
+    expect(toolbar.className).toContain('py-2');
+
     const searchInput = screen.getByLabelText('搜索文本');
+    expect(searchInput.className).toContain('bg-[rgba(255,255,255,0.15)]');
+    expect(searchInput.className).toContain('border-[rgba(255,255,255,0.2)]');
+    expect(searchInput.className).toContain('rounded-[8px]');
+    expect(searchInput.className).toContain('placeholder:text-[#FFFFFF99]');
+    expect(searchInput.className).toContain('px-3');
+    expect(searchInput.className).toContain('py-1');
+    expect(searchInput.className).toContain('hover:bg-[rgba(255,255,255,0.22)]');
+    expect(searchInput.className).toContain('focus:bg-white');
+    expect(searchInput.className).toContain('focus:text-gray-700');
+
+    expect(screen.queryByRole('button', {name: '复制全文'})).not.toBeInTheDocument();
+
     fireEvent.change(searchInput, {target: {value: 'world'}});
 
     const highlighted = screen.getByTestId('text-preview-highlight');
     expect(highlighted).toHaveTextContent('world');
     expect(screen.getByRole('status')).toHaveTextContent('已匹配 1 处');
-  });
-
-  it('copies full text and shows feedback', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: {writeText},
-    });
-
-    render(<TextPreview text="copy me" />);
-
-    fireEvent.click(screen.getByRole('button', {name: '复制全文'}));
-
-    expect(writeText).toHaveBeenCalledWith('copy me');
-    expect(await screen.findByRole('status')).toHaveTextContent('已复制。');
-  });
-
-  it('shows friendly message when clipboard is unavailable', () => {
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: undefined,
-    });
-
-    render(<TextPreview text="copy me" />);
-
-    fireEvent.click(screen.getByRole('button', {name: '复制全文'}));
-
-    expect(screen.getByRole('status')).toHaveTextContent('当前环境不支持复制，请手动复制。');
-  });
-
-  it('shows friendly message when clipboard write fails', async () => {
-    const writeText = vi.fn().mockRejectedValue(new Error('denied'));
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: {writeText},
-    });
-
-    render(<TextPreview text="copy me" />);
-
-    fireEvent.click(screen.getByRole('button', {name: '复制全文'}));
-
-    expect(writeText).toHaveBeenCalledWith('copy me');
-    expect(await screen.findByRole('status')).toHaveTextContent('复制失败，请稍后重试。');
   });
 
   it('shows friendly message in error state', () => {
@@ -442,5 +513,46 @@ describe('text preview renderer', () => {
     expect(screen.getByTestId('text-preview-error')).toBeInTheDocument();
     expect(screen.getByText('文本预览失败，请稍后重试。')).toBeInTheDocument();
     expect(screen.getByText('文本读取失败')).toBeInTheDocument();
+  });
+
+  it('highlights source snippet inside text preview', () => {
+    render(<TextPreview text="第一段\n关键命中内容\n第三段" sourceHighlight={{content: '关键命中内容'}} />);
+
+    expect(screen.getByTestId('preview-highlight-block')).toHaveTextContent('关键命中内容');
+  });
+
+  it('renders text source as block highlight and supports click-through', () => {
+    const onOpenDetail = vi.fn();
+    const onBackToQa = vi.fn();
+    render(
+      <TextPreview
+        text="第一段\n目标分块正文\n第三段"
+        sourceHighlight={{content: '目标分块正文'}}
+        onSourceBlockClick={onOpenDetail}
+        onSourceBlockAuxClick={onBackToQa}
+      />,
+    );
+
+    expect(screen.getByTestId('preview-highlight-block')).toHaveTextContent('目标分块正文');
+    fireEvent.click(screen.getByTestId('preview-highlight-block'));
+    expect(onOpenDetail).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId('text-preview-source-highlight-back-to-qa'));
+    expect(onBackToQa).toHaveBeenCalledTimes(1);
+  });
+
+  it('supports back-to-qa action from table source highlight block', () => {
+    const onBackToQa = vi.fn();
+    render(
+      <TablePreview
+        sheets={[
+          {id: 'sheet-1', name: 'Sheet 1', columns: ['姓名'], rows: [['张三'], ['李四'], ['王五']]},
+        ]}
+        sourceHighlight={{sheetId: 'sheet-1', rowStart: 1, rowEnd: 2, content: '李四 王五'}}
+        onSourceBlockAuxClick={onBackToQa}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('table-preview-source-highlight-back-to-qa'));
+    expect(onBackToQa).toHaveBeenCalledTimes(1);
   });
 });

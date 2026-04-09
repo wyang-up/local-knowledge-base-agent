@@ -13,7 +13,10 @@
     "lint": "npm run lint:frontend && npm run lint:backend",
     "lint:frontend": "tsc --noEmit",
     "lint:backend": "npm run lint --prefix backend",
-    "test": "vitest run --config frontend/config/vitest.config.ts"
+    "test": "vitest run --config frontend/config/vitest.config.ts",
+    "test:frontend:stable": "vitest run --config frontend/config/vitest.config.ts --pool threads --maxWorkers 1 --no-isolate",
+    "test:backend": "vitest run --config vitest.config.ts backend/pipeline/document-delete.test.ts backend/pipeline/document-pipeline-store.test.ts backend/pipeline/document-artifact-store.test.ts",
+    "test:regression": "npm run test:backend && npm run test:frontend:stable -- frontend/src/pages/app/components/preview/renderers/preview-renderers.test.tsx frontend/src/pages/app/components/preview/DocumentPreviewContent.test.tsx frontend/src/pages/app/components/DocumentListPanel.test.tsx frontend/src/pages/app/components/DocumentDetailPanel.test.tsx frontend/src/pages/app/App.test.tsx"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
@@ -31,6 +34,7 @@
     "motion": "^12.23.24",
     "multer": "^2.1.1",
     "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^5.6.205",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sqlite": "^5.1.1",

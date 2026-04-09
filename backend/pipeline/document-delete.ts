@@ -5,6 +5,7 @@ type DeleteDocumentResourcesInput = {
   filePath?: string | null;
   chunkTable?: { delete: (predicate: string) => Promise<unknown> } | null;
   clearDocumentData: (documentId: string) => Promise<unknown>;
+  clearDocumentArtifacts?: (documentId: string) => Promise<unknown>;
   deleteDocumentRow: (documentId: string) => Promise<unknown>;
 };
 
@@ -14,6 +15,9 @@ export async function deleteDocumentResources(input: DeleteDocumentResourcesInpu
   }
 
   await input.clearDocumentData(input.documentId);
+  if (input.clearDocumentArtifacts) {
+    await input.clearDocumentArtifacts(input.documentId);
+  }
   await input.deleteDocumentRow(input.documentId);
 
   if (input.filePath && fs.existsSync(input.filePath)) {

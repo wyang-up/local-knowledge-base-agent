@@ -106,6 +106,7 @@ describe('DocumentListPanel preview integration', () => {
         language="zh"
         apiUrl={(endpoint) => endpoint}
         onOpenDetail={onOpenDetail}
+        onDocumentDeleted={vi.fn()}
         locale={defaultLocale}
       />,
     );
@@ -131,6 +132,103 @@ describe('DocumentListPanel preview integration', () => {
     expect(screen.getByText('示例文档.pdf')).toBeInTheDocument();
   });
 
+  it('uses edge-to-edge content area for txt preview', async () => {
+    documents = [
+      {
+        id: 'doc-1',
+        name: '示例文档.txt',
+        size: 256,
+        type: '.txt',
+        uploadTime: '2026-03-30T00:00:00.000Z',
+        status: 'completed',
+        chunkCount: 1,
+        description: '',
+      },
+    ];
+
+    vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/documents') {
+        return new Response(JSON.stringify(documents), {status: 200});
+      }
+      if (url === '/api/settings/preview-flags') {
+        return new Response(JSON.stringify({enableNewPreviewModal: true, enableNewPreviewByType: {text: true}}), {status: 200});
+      }
+      if (url === '/api/documents/doc-1/content') {
+        return new Response(JSON.stringify({mimeType: 'text/plain', content: 'hello world'}), {
+          status: 200,
+          headers: {'Content-Type': 'application/json'},
+        });
+      }
+      if (url === '/api/documents/doc-1') {
+        return new Response(JSON.stringify({chunks: []}), {status: 200});
+      }
+      return new Response(JSON.stringify({status: 'ok'}), {status: 200});
+    });
+
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(await screen.findByRole('button', {name: '预览'}));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    const toolbar = await screen.findByTestId('text-preview-toolbar');
+    expect(toolbar).toBeInTheDocument();
+    const main = toolbar.closest('main');
+    expect(main?.className).not.toContain('px-4');
+    expect(main?.className).not.toContain('py-3');
+  });
+
+  it('uses same modal sizing strategy for json preview as txt preview', async () => {
+    documents = [
+      {
+        id: 'doc-1',
+        name: '示例文档.json',
+        size: 512,
+        type: '.json',
+        uploadTime: '2026-03-30T00:00:00.000Z',
+        status: 'completed',
+        chunkCount: 1,
+        description: '',
+      },
+    ];
+
+    vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/documents') {
+        return new Response(JSON.stringify(documents), {status: 200});
+      }
+      if (url === '/api/settings/preview-flags') {
+        return new Response(JSON.stringify({enableNewPreviewModal: true, enableNewPreviewByType: {json: true}}), {status: 200});
+      }
+      if (url === '/api/documents/doc-1/content') {
+        return new Response(JSON.stringify({mimeType: 'application/json', content: {name: 'Alice'}}), {
+          status: 200,
+          headers: {'Content-Type': 'application/json'},
+        });
+      }
+      if (url === '/api/documents/doc-1') {
+        return new Response(JSON.stringify({chunks: []}), {status: 200});
+      }
+      return new Response(JSON.stringify({status: 'ok'}), {status: 200});
+    });
+
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(await screen.findByRole('button', {name: '预览'}));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.className).toContain('h-[calc(100vh-2rem)]');
+    expect(dialog.className).toContain('max-h-[calc(100vh-2rem)]');
+
+    const renderer = await screen.findByTestId('json-preview-renderer');
+    const main = renderer.closest('main');
+    expect(main?.className).not.toContain('px-4');
+    expect(main?.className).not.toContain('py-3');
+  });
+
   it('locate chunk closes modal and opens detail in phase1', async () => {
     mockFetch();
     const user = userEvent.setup();
@@ -143,8 +241,57 @@ describe('DocumentListPanel preview integration', () => {
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-      expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({id: 'doc-1'}));
+      expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({id: 'doc-1'}), undefined);
     });
+  });
+
+  it('opens preview modal from previewRequest prop', async () => {
+    mockFetch();
+
+    render(
+      <DocumentListPanel
+        isDarkTheme={false}
+        language="zh"
+        apiUrl={(endpoint) => endpoint}
+        onOpenDetail={vi.fn()}
+        locale={defaultLocale}
+        previewRequest={{
+          docId: 'doc-1',
+          docName: '示例文档.pdf',
+          chunkId: 'chunk-1',
+          chunkIndex: 0,
+          content: 'legacy-chunk',
+        }}
+      />,
+    );
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(await screen.findByTestId('pdf-preview-renderer')).toBeInTheDocument();
+  });
+
+  it('shows only one back-to-qa button in source preview modal', async () => {
+    mockFetch();
+
+    render(
+      <DocumentListPanel
+        isDarkTheme={false}
+        language="zh"
+        apiUrl={(endpoint) => endpoint}
+        onOpenDetail={vi.fn()}
+        onBackToQa={vi.fn()}
+        locale={defaultLocale}
+        previewRequest={{
+          docId: 'doc-1',
+          docName: '示例文档.pdf',
+          chunkId: 'chunk-1',
+          chunkIndex: 0,
+          content: 'legacy-chunk',
+        }}
+      />,
+    );
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', {name: '返回AI回答'})).toHaveLength(1);
   });
 
   it('falls back to legacy preview when global switch is off', async () => {
@@ -202,13 +349,26 @@ describe('DocumentListPanel preview integration', () => {
   });
 
   it('auto falls back to legacy preview when new preview content request fails', async () => {
+    documents = [
+      {
+        id: 'doc-1',
+        name: '文档一.txt',
+        size: 1024,
+        type: '.txt',
+        uploadTime: '2026-03-30T00:00:00.000Z',
+        status: 'completed',
+        chunkCount: 1,
+        description: '',
+      },
+    ];
+
     vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
       if (url === '/api/documents') {
         return new Response(JSON.stringify(documents), {status: 200});
       }
       if (url === '/api/settings/preview-flags') {
-        return new Response(JSON.stringify({enableNewPreviewModal: true, enableNewPreviewByType: {pdf: true}}), {status: 200});
+        return new Response(JSON.stringify({enableNewPreviewModal: true, enableNewPreviewByType: {text: true}}), {status: 200});
       }
       if (url === '/api/documents/doc-1/content') {
         return new Response(JSON.stringify({error: 'content failed'}), {status: 500});

@@ -16,6 +16,7 @@ interface ModelConfigCardProps {
   providers: Array<{ id: string; label: string }>;
   baseUrl: string;
   apiKey: string;
+  hasApiKeyConfigured?: boolean;
   llmModel: string;
   embeddingModel: string;
   stateText: string;
@@ -40,6 +41,7 @@ export default function ModelConfigCard({
   providers,
   baseUrl,
   apiKey,
+  hasApiKeyConfigured = false,
   llmModel,
   embeddingModel,
   stateText,
@@ -125,6 +127,7 @@ export default function ModelConfigCard({
             value={apiKey}
             type={isApiKeyRevealed ? 'text' : 'password'}
             aria-label="API Key"
+            placeholder={hasApiKeyConfigured && !apiKey ? '••••••••（已配置）' : ''}
             onChange={(event) => onApiKeyChange(event.target.value)}
             className={`w-full rounded-lg border px-3 py-2 ${isDark ? 'border-slate-700 bg-slate-950 text-slate-100' : 'border-slate-300 bg-white text-slate-900'}`}
           />

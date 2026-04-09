@@ -1,141 +1,84 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef} from 'react';
+import type {SourceHighlightTarget} from '../source-highlight-target';
+import {HighlightBlock} from './highlight-block';
 
 type JsonPreviewProps = {
   value: unknown;
   isPartialPreview?: boolean;
   errorMessage?: string;
+  sourceHighlight?: SourceHighlightTarget | null;
+  onSourceBlockClick?: () => void;
+  onSourceBlockAuxClick?: () => void;
 };
 
-function tryParseJson(value: unknown): {parsedValue: unknown; parseError: string | null} {
+type TextRange = {
+  start: number;
+  end: number;
+};
+
+function tryParseJson(value: unknown): {text: string; parseError: string | null} {
   if (typeof value !== 'string') {
-    return {parsedValue: value, parseError: null};
+    try {
+      return {text: JSON.stringify(value, null, 2), parseError: null};
+    } catch {
+      return {text: String(value), parseError: null};
+    }
   }
 
   try {
-    return {parsedValue: JSON.parse(value), parseError: null};
+    const parsed = JSON.parse(value);
+    return {text: JSON.stringify(parsed, null, 2), parseError: null};
   } catch {
-    return {parsedValue: null, parseError: 'JSON 格式错误，无法解析预览内容。'};
+    return {text: value, parseError: 'JSON 格式错误，无法解析预览内容。'};
   }
 }
 
-function isObjectLike(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+function findWhitespaceInsensitiveRange(text: string, snippet: string): TextRange | null {
+  const compactSnippet = snippet.replace(/\s+/g, '');
+  if (!compactSnippet) {
+    return null;
+  }
+
+  let compactText = '';
+  const indexMap: number[] = [];
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (/\s/.test(char)) {
+      continue;
+    }
+    compactText += char;
+    indexMap.push(index);
+  }
+
+  const compactStart = compactText.indexOf(compactSnippet);
+  if (compactStart < 0) {
+    return null;
+  }
+
+  const compactEnd = compactStart + compactSnippet.length - 1;
+  return {
+    start: indexMap[compactStart],
+    end: indexMap[compactEnd] + 1,
+  };
 }
 
-function isCollapsible(value: unknown): boolean {
-  if (Array.isArray(value)) {
-    return value.length > 0;
-  }
-  if (isObjectLike(value)) {
-    return Object.keys(value).length > 0;
-  }
-  return false;
-}
-
-function getNodeSummary(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.length}]`;
-  }
-  if (isObjectLike(value)) {
-    return `{${Object.keys(value).length}}`;
-  }
-  if (typeof value === 'string') {
-    return `"${value}"`;
-  }
-  if (value === null) {
-    return 'null';
-  }
-  return String(value);
-}
-
-function stringifyForCopy(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-type PathSegment = string | number;
-
-function encodePath(pathSegments: PathSegment[]): string {
-  return JSON.stringify(pathSegments);
-}
-
-export function JsonPreview({value, isPartialPreview = false, errorMessage}: JsonPreviewProps) {
-  const {parsedValue, parseError} = useMemo(() => tryParseJson(value), [value]);
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set([encodePath([])]));
-  const [copyMessage, setCopyMessage] = useState('');
+export function JsonPreview({value, isPartialPreview = false, errorMessage, sourceHighlight = null, onSourceBlockClick, onSourceBlockAuxClick}: JsonPreviewProps) {
+  const {text, parseError} = useMemo(() => tryParseJson(value), [value]);
+  const preRef = useRef<HTMLPreElement | null>(null);
 
   const finalErrorMessage = errorMessage ?? parseError;
+  const sourceKeyword = sourceHighlight?.content?.trim() || '';
+  const sourceRange = useMemo(() => findWhitespaceInsensitiveRange(text, sourceKeyword), [text, sourceKeyword]);
 
   useEffect(() => {
-    setExpandedPaths(new Set([encodePath([])]));
-  }, [parsedValue]);
-
-  const togglePath = (pathKey: string) => {
-    setExpandedPaths((current) => {
-      const next = new Set(current);
-      if (next.has(pathKey)) {
-        next.delete(pathKey);
-      } else {
-        next.add(pathKey);
-      }
-      return next;
-    });
-  };
-
-  const handleCopy = async () => {
-    const textToCopy = stringifyForCopy(parsedValue);
-    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
-      setCopyMessage('当前环境不支持复制，请手动复制。');
+    if (!preRef.current || !sourceRange) {
       return;
     }
 
-    try {
-      await navigator.clipboard.writeText(textToCopy);
-      setCopyMessage('已复制。');
-    } catch {
-      setCopyMessage('复制失败，请稍后重试。');
-    }
-  };
-
-  const renderNode = (node: unknown, pathSegments: PathSegment[], keyName: string | null, depth: number) => {
-    const pathKey = encodePath(pathSegments);
-    const canCollapse = isCollapsible(node);
-    const isExpanded = expandedPaths.has(pathKey);
-    const isCollapsed = canCollapse && !isExpanded;
-    const label = keyName ?? '根节点';
-
-    return (
-      <div key={pathKey}>
-        <div style={{display: 'flex', alignItems: 'center', gap: 8, marginLeft: depth * 16}}>
-          {canCollapse ? (
-            <button
-              type="button"
-              onClick={() => togglePath(pathKey)}
-              aria-label={`${isCollapsed ? '展开' : '折叠'} ${label}`}
-            >
-              {isCollapsed ? '+' : '-'}
-            </button>
-          ) : (
-            <span style={{width: 24, display: 'inline-block'}} />
-          )}
-          {keyName ? <span>{keyName}</span> : null}
-          <code>{getNodeSummary(node)}</code>
-        </div>
-
-        {!isCollapsed && Array.isArray(node)
-          ? node.map((item, index) => renderNode(item, [...pathSegments, index], String(index), depth + 1))
-          : null}
-        {!isCollapsed && isObjectLike(node)
-          ? Object.entries(node).map(([childKey, childValue]) =>
-              renderNode(childValue, [...pathSegments, childKey], childKey, depth + 1),
-            )
-          : null}
-      </div>
-    );
-  };
+    const node = preRef.current;
+    const ratio = sourceRange.start / Math.max(text.length, 1);
+    node.scrollTop = Math.max(0, (node.scrollHeight - node.clientHeight) * ratio);
+  }, [sourceRange, text]);
 
   if (finalErrorMessage) {
     return (
@@ -146,22 +89,48 @@ export function JsonPreview({value, isPartialPreview = false, errorMessage}: Jso
     );
   }
 
-  return (
-    <section data-testid="json-preview-renderer">
-      <div>
-        <button type="button" onClick={() => void handleCopy()}>
-          复制全文
-        </button>
-        {copyMessage ? (
-          <span role="status" aria-live="polite">
-            {copyMessage}
-          </span>
-        ) : null}
-      </div>
+  const renderContent = () => {
+    if (sourceRange) {
+      const before = text.slice(0, sourceRange.start);
+      const match = text.slice(sourceRange.start, sourceRange.end);
+      const after = text.slice(sourceRange.end);
+      return (
+        <>
+          {before}
+          <HighlightBlock onClick={onSourceBlockClick}>
+            <span data-testid="json-preview-source-highlight" className="block px-2 py-1">{match}</span>
+            {onSourceBlockAuxClick ? (
+              <button
+                type="button"
+                data-testid="json-preview-source-highlight-back-to-qa"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSourceBlockAuxClick();
+                }}
+                className="ml-2 mb-2 rounded-[8px] border border-[#1677FF]/35 px-2 py-1 text-xs text-[#1677FF] hover:bg-blue-50"
+              >
+                返回AI回答
+              </button>
+            ) : null}
+          </HighlightBlock>
+          {after}
+        </>
+      );
+    }
+    return text;
+  };
 
+  return (
+    <section data-testid="json-preview-renderer" className="h-full min-h-0 flex flex-col">
       {isPartialPreview ? <p>当前仅展示部分预览内容。</p> : null}
 
-      <div>{renderNode(parsedValue, [], null, 0)}</div>
+      <pre
+        ref={preRef}
+        data-testid="json-preview-content"
+        className="min-h-0 flex-1 overflow-auto px-3 py-2 text-sm leading-6 whitespace-pre-wrap break-words"
+      >
+        {renderContent()}
+      </pre>
     </section>
   );
 }

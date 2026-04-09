@@ -12,5 +12,6 @@ export default defineConfig({
     setupFiles: ['./frontend/src/test/setup.ts'],
     globals: true,
     pool: 'threads',
+    exclude: ['**/.worktrees/**'],
   },
 });

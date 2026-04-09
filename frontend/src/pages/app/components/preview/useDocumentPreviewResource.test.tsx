@@ -383,14 +383,8 @@ describe('useDocumentPreviewResource', () => {
     });
   });
 
-  it('maps pdf byte stream to object URL resource', async () => {
-    const createObjectUrlSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-pdf-url');
-    vi.spyOn(global, 'fetch').mockResolvedValue(
-      new Response(new Uint8Array([37, 80, 68, 70]), {
-        status: 200,
-        headers: {'Content-Type': 'application/pdf'},
-      }),
-    );
+  it('uses direct endpoint URL for pdf preview without blob fetch', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch');
 
     const {result} = renderHook(() => useDocumentPreviewResource({
       apiUrl: createApiUrl,
@@ -405,10 +399,187 @@ describe('useDocumentPreviewResource', () => {
       expect(result.current.resource).toMatchObject({
         documentId: 'doc-pdf-bytes',
         documentType: '.pdf',
-        content: {src: 'blob:mock-pdf-url'},
+        kind: 'pdf',
+        content: {src: '/api/documents/doc-pdf-bytes/content'},
       });
     });
 
-    expect(createObjectUrlSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps raw json document intact when payload only happens to include content key', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({
+        content: {deep: {value: 42}},
+        profile: {name: 'Alice'},
+      }), {
+        status: 200,
+        headers: {'Content-Type': 'application/json'},
+      }),
+    );
+
+    const {result} = renderHook(() => useDocumentPreviewResource({
+      apiUrl: createApiUrl,
+      documentId: 'doc-json-raw',
+      documentType: '.json',
+      enabled: true,
+    }));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBeNull();
+      expect(result.current.resource).toMatchObject({
+        documentId: 'doc-json-raw',
+        documentType: '.json',
+        kind: 'json',
+        content: '{"content":{"deep":{"value":42}},"profile":{"name":"Alice"}}',
+      });
+    });
+  });
+
+  it('keeps root-level content key for real json documents', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({
+        content: {nested: true},
+        name: 'raw-json',
+      }), {
+        status: 200,
+        headers: {'Content-Type': 'application/json'},
+      }),
+    );
+
+    const {result} = renderHook(() => useDocumentPreviewResource({
+      apiUrl: createApiUrl,
+      documentId: 'doc-json-content-root',
+      documentType: '.json',
+      enabled: true,
+    }));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBeNull();
+      expect(result.current.resource).toMatchObject({
+        documentId: 'doc-json-content-root',
+        documentType: '.json',
+        kind: 'json',
+        content: '{"content":{"nested":true},"name":"raw-json"}',
+      });
+    });
+  });
+
+  it('unwraps payload only when response is explicit standard wrapped preview payload', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({
+        __previewWrapped: true,
+        mimeType: 'application/json',
+        isPartialPreview: true,
+        content: {items: [1, 2, 3]},
+      }), {
+        status: 200,
+        headers: {'Content-Type': 'application/json'},
+      }),
+    );
+
+    const {result} = renderHook(() => useDocumentPreviewResource({
+      apiUrl: createApiUrl,
+      documentId: 'doc-json-wrapped',
+      documentType: '.json',
+      enabled: true,
+    }));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBeNull();
+      expect(result.current.resource).toMatchObject({
+        documentId: 'doc-json-wrapped',
+        documentType: '.json',
+        kind: 'json',
+        isPartialPreview: true,
+        content: {items: [1, 2, 3]},
+      });
+    });
+  });
+
+  it('does not unwrap json payload when marker is absent', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({
+        mimeType: 'application/json',
+        isPartialPreview: false,
+        content: {items: [9, 8, 7]},
+      }), {
+        status: 200,
+        headers: {'Content-Type': 'application/json'},
+      }),
+    );
+
+    const {result} = renderHook(() => useDocumentPreviewResource({
+      apiUrl: createApiUrl,
+      documentId: 'doc-json-legacy-wrapped',
+      documentType: '.json',
+      enabled: true,
+    }));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBeNull();
+      expect(result.current.resource).toMatchObject({
+        documentId: 'doc-json-legacy-wrapped',
+        documentType: '.json',
+        kind: 'json',
+        content: '{"mimeType":"application/json","isPartialPreview":false,"content":{"items":[9,8,7]}}',
+      });
+    });
+  });
+
+  it('decodes gb18030 text content for txt preview', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(new Uint8Array([0xd6, 0xd0, 0xce, 0xc4]), {
+        status: 200,
+        headers: {'Content-Type': 'text/plain'},
+      }),
+    );
+
+    const {result} = renderHook(() => useDocumentPreviewResource({
+      apiUrl: createApiUrl,
+      documentId: 'doc-gb18030',
+      documentType: '.txt',
+      enabled: true,
+    }));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBeNull();
+      expect(result.current.resource).toMatchObject({
+        documentId: 'doc-gb18030',
+        documentType: '.txt',
+        content: '中文',
+      });
+    });
+  });
+
+  it('decodes utf16le text without bom for txt preview', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(new Uint8Array([0x2d, 0x4e, 0x87, 0x65, 0x61, 0x00, 0x62, 0x00]), {
+        status: 200,
+        headers: {'Content-Type': 'text/plain'},
+      }),
+    );
+
+    const {result} = renderHook(() => useDocumentPreviewResource({
+      apiUrl: createApiUrl,
+      documentId: 'doc-utf16le-no-bom',
+      documentType: '.txt',
+      enabled: true,
+    }));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBeNull();
+      expect(result.current.resource).toMatchObject({
+        documentId: 'doc-utf16le-no-bom',
+        documentType: '.txt',
+        content: '中文ab',
+      });
+    });
   });
 });

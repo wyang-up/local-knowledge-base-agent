@@ -25,6 +25,11 @@ export function createDocumentArtifactStore(baseDir: string) {
   const getMetaPath = (documentId: string, stage: ArtifactStage) => path.join(getDocumentDir(documentId), `${stage}.meta.json`);
 
   return {
+    async clearDocumentArtifacts(documentId: string) {
+      const documentDir = getDocumentDir(documentId);
+      await fs.rm(documentDir, { recursive: true, force: true });
+    },
+
     async saveArtifact(documentId: string, stage: ArtifactStage, payload: unknown, fingerprint?: ArtifactFingerprint) {
       const documentDir = getDocumentDir(documentId);
       await ensureDir(documentDir);

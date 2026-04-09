@@ -1,4 +1,4 @@
-import {render, screen} from '@testing-library/react';
+import {fireEvent, render, screen} from '@testing-library/react';
 import {describe, expect, it, vi} from 'vitest';
 import {DocumentPreviewContent, resolveDocumentPreviewType} from './DocumentPreviewContent';
 
@@ -114,24 +114,55 @@ describe('DocumentPreviewContent', () => {
   });
 
   it('routes to pdf renderer with preview resource', () => {
+    const onLocateChunk = vi.fn();
+    const onBackToQa = vi.fn();
+
     render(
       <DocumentPreviewContent
         mimeType="application/pdf"
         fileName="sample.pdf"
+        sourceHighlight={{chunkId: 'chunk-9', chunkIndex: 8, content: 'this is source chunk text'}}
+        onLocateChunk={onLocateChunk}
+        onBackToQa={onBackToQa}
         resource={{
           documentId: 'doc-pdf',
           documentType: '.pdf',
           mimeType: 'application/pdf',
           content: {src: 'blob:https://example.com/sample.pdf'},
-          totalPages: 5,
         }}
       />, 
     );
 
     expect(screen.getByTestId('pdf-preview-renderer')).toBeInTheDocument();
+    expect(screen.getByText('溯源定位：')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', {name: '跳转详情'}));
+    fireEvent.click(screen.getByRole('button', {name: '返回AI回答'}));
+    expect(onLocateChunk).toHaveBeenCalledTimes(1);
+    expect(onBackToQa).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes source highlight through to pdf preview so it can locate source area', () => {
+    render(
+      <DocumentPreviewContent
+        mimeType="application/pdf"
+        fileName="sample.pdf"
+        sourceHighlight={{chunkId: 'chunk-9', chunkIndex: 8, content: 'this is source chunk text'}}
+        resource={{
+          documentId: 'doc-pdf',
+          documentType: '.pdf',
+          mimeType: 'application/pdf',
+          content: {src: '/api/documents/doc-pdf/content'},
+        }}
+      />, 
+    );
+
+    expect(screen.getByTestId('pdf-preview-renderer')).toBeInTheDocument();
+    expect(screen.getByText('溯源定位：')).toBeInTheDocument();
+    expect(screen.getByTitle('PDF 预览内容')).toBeInTheDocument();
   });
 
   it('routes to table/json/text renderers by resolved type', () => {
+    const onLocateChunk = vi.fn();
     const {rerender} = render(
       <DocumentPreviewContent
         extension=".xlsx"
@@ -148,6 +179,8 @@ describe('DocumentPreviewContent', () => {
     rerender(
       <DocumentPreviewContent
         extension=".json"
+        sourceHighlight={{content: 'Alice'}}
+        onLocateChunk={onLocateChunk}
         resource={{
           documentId: 'doc-json',
           documentType: '.json',
@@ -156,10 +189,13 @@ describe('DocumentPreviewContent', () => {
       />,
     );
     expect(screen.getByTestId('json-preview-renderer')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-highlight-block')).toBeInTheDocument();
 
     rerender(
       <DocumentPreviewContent
         extension=".txt"
+        sourceHighlight={{content: 'world'}}
+        onLocateChunk={onLocateChunk}
         resource={{
           documentId: 'doc-text',
           documentType: '.txt',
@@ -168,5 +204,7 @@ describe('DocumentPreviewContent', () => {
       />,
     );
     expect(screen.getByTestId('text-preview-renderer')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('preview-highlight-block'));
+    expect(onLocateChunk).toHaveBeenCalledTimes(1);
   });
 });

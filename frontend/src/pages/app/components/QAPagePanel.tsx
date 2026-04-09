@@ -1,5 +1,5 @@
 import {Bot, File, Loader2, MoreHorizontal, Pin, Plus, Search, Send, UploadCloud, User} from 'lucide-react';
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import type {RefObject} from 'react';
 import {cn} from '../../../shared/lib/utils';
 import type {Conversation, Message, MessageSource} from '../../../shared/types';
@@ -37,6 +37,8 @@ type QALocale = {
   qaLlmStatus: string;
   qaMcpStatusStreaming: string;
   qaMcpStatusIdle: string;
+  qaSourceInvalidSuffix?: string;
+  qaSourceInvalidToast?: string;
 };
 
 type QAPagePanelProps = {
@@ -115,6 +117,43 @@ export function QAPagePanel({
   const QA_TAG_ALL = '__all__';
   const [expandedSourceMessageIds, setExpandedSourceMessageIds] = useState<Record<string, boolean>>({});
   const [hoveredSourceKey, setHoveredSourceKey] = useState<string | null>(null);
+  const [existingDocIdSet, setExistingDocIdSet] = useState<Set<string> | null>(null);
+  const [docNameById, setDocNameById] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/documents')
+      .then(async (res) => {
+        if (!res.ok) {
+          setExistingDocIdSet(null);
+          setDocNameById({});
+          return;
+        }
+        const docs = await res.json();
+        if (cancelled || !Array.isArray(docs)) return;
+        const ids = new Set<string>();
+        const names: Record<string, string> = {};
+        docs.forEach((doc: any) => {
+          if (typeof doc?.id === 'string' && doc.id) {
+            ids.add(doc.id);
+            if (typeof doc?.name === 'string' && doc.name.trim()) {
+              names[doc.id] = doc.name.trim();
+            }
+          }
+        });
+        setExistingDocIdSet(ids);
+        setDocNameById(names);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setExistingDocIdSet(null);
+          setDocNameById({});
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [qaMessages]);
 
   const getMessageId = (message: Message, index: number) => message.id || `qa-msg-${index}`;
 
@@ -273,13 +312,25 @@ export function QAPagePanel({
             const assistantSources = msg.role === 'assistant' ? (msg.sources ?? []) : [];
             const isSourceExpanded = expandedSourceMessageIds[messageId] === true;
 
+            const groupedSources = assistantSources.reduce<Record<string, MessageSource[]>>((acc, source) => {
+              const key = (source.docId && docNameById[source.docId]) || source.docName || locale.qaSourceUnknownDoc;
+              if (!acc[key]) acc[key] = [];
+              acc[key].push(source);
+              return acc;
+            }, {});
+
             return (
             <div key={messageId} className={cn('flex gap-4 max-w-3xl', msg.role === 'user' ? 'ml-auto flex-row-reverse' : '')}>
               <div className={cn('w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm', msg.role === 'user' ? 'bg-blue-600 text-white' : (isDarkTheme ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-600'))}>
                 {msg.role === 'user' ? <User size={16} /> : <Bot size={18} />}
               </div>
-              <div className={cn('flex flex-col gap-2', msg.role === 'user' ? 'items-end' : 'items-start')}>
-                <div className={msg.role === 'user' ? 'p-4 rounded-lg text-sm leading-relaxed whitespace-pre-wrap bg-[#1677FF] text-white' : cn('p-4 rounded-lg text-sm leading-relaxed whitespace-pre-wrap shadow-sm', isDarkTheme ? 'bg-slate-900 border border-slate-700 text-slate-100' : 'bg-[#f5f7fa] border border-gray-200 text-gray-800')}>
+              <div className={cn('flex flex-col gap-2 w-full', msg.role === 'user' ? 'items-end' : 'items-start')}>
+                <div className={cn(
+                  'w-full max-w-full p-4 rounded-lg text-sm leading-relaxed whitespace-pre-wrap shadow-sm',
+                  msg.role === 'user'
+                    ? 'bg-[#1677FF] text-white'
+                    : (isDarkTheme ? 'bg-slate-900 border border-slate-700 text-slate-100' : 'bg-[#f5f7fa] border border-gray-200 text-gray-800'),
+                )}>
                   {msg.content}
                 </div>
                 {assistantSources.length > 0 && (
@@ -297,33 +348,56 @@ export function QAPagePanel({
 
                     {isSourceExpanded && (
                       <div className="mt-2 space-y-2">
-                        {assistantSources.map((src, sourceIndex) => {
-                          const chunkLabel = language === 'en'
-                            ? `Chunk ${(src.chunkIndex ?? sourceIndex) + 1}`
-                            : `第${(src.chunkIndex ?? sourceIndex) + 1}分块`;
-                          const label = `${src.docName || locale.qaSourceUnknownDoc} - ${chunkLabel}`;
-                          const sourceKey = `${messageId}-${src.chunkId ?? sourceIndex}`;
-                          return (
-                            <div key={sourceKey} className="relative">
-                              <button
-                                type="button"
-                                title={src.content || ''}
-                                onClick={() => onOpenSource(src)}
-                                onMouseEnter={() => setHoveredSourceKey(sourceKey)}
-                                onMouseLeave={() => setHoveredSourceKey((prev) => (prev === sourceKey ? null : prev))}
-                                className={cn('w-full text-left inline-flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors', isDarkTheme ? 'text-sky-200 bg-sky-900/30 hover:bg-sky-900/45 border-sky-800' : 'text-blue-600 bg-blue-50 hover:bg-blue-100 border-blue-100')}
-                              >
-                                <File size={12} /> {label}
-                              </button>
+                        {Object.entries(groupedSources).map(([docName, docSources]) => (
+                          <div key={`${messageId}-${docName}`} className="space-y-1">
+                            <p className={cn('text-xs font-medium', isDarkTheme ? 'text-slate-300' : 'text-gray-700')}>{docName}</p>
+                            <div className="flex flex-wrap gap-2">
+                              {docSources.map((src, sourceIndex) => {
+                                const chunkNo = (src.chunkIndex ?? sourceIndex) + 1;
+                                const resolvedDocName = (src.docId && docNameById[src.docId]) || docName;
+                                const label = `${resolvedDocName}-第${chunkNo}分块`;
+                                const invalid = existingDocIdSet
+                                  ? (!src.docId || !existingDocIdSet.has(src.docId))
+                                  : false;
+                                const summary = (src.content || '').replace(/\s+/g, ' ').trim();
+                                const sourceKey = `${messageId}-${src.chunkId ?? `${docName}-${chunkNo}`}`;
 
-                              {hoveredSourceKey === sourceKey && src.content && (
-                                <div className={cn('absolute left-0 top-full mt-1 z-20 max-w-sm text-xs leading-relaxed px-2 py-1.5 rounded border shadow', isDarkTheme ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-gray-200 text-gray-700')}>
-                                  {src.content}
-                                </div>
-                              )}
+                                return (
+                                  <div key={sourceKey} className="relative">
+                                    <button
+                                      type="button"
+                                      title={summary}
+                                      onClick={() => {
+                                        if (invalid) {
+                                          window.alert(locale.qaSourceInvalidToast ?? '该溯源已失效，请检查文档是否被删除。');
+                                          return;
+                                        }
+                                        onOpenSource(src);
+                                      }}
+                                      onMouseEnter={() => setHoveredSourceKey(sourceKey)}
+                                      onMouseLeave={() => setHoveredSourceKey((prev) => (prev === sourceKey ? null : prev))}
+                                      className={cn(
+                                        'text-left inline-flex items-center gap-1 text-xs px-2 py-1 rounded-[8px] border transition-colors',
+                                        invalid
+                                          ? (isDarkTheme ? 'text-slate-400 bg-slate-800 border-slate-700' : 'text-gray-500 bg-gray-100 border-gray-200')
+                                          : (isDarkTheme ? 'text-sky-200 bg-sky-900/30 hover:bg-sky-900/45 border-sky-800' : 'text-[#1677FF] bg-blue-50 hover:bg-blue-100 border-blue-100'),
+                                      )}
+                                    >
+                                      <File size={12} />
+                                      {label}{invalid ? (locale.qaSourceInvalidSuffix ?? '（已失效）') : ''}
+                                    </button>
+
+                                    {hoveredSourceKey === sourceKey && summary && (
+                                      <div className={cn('absolute left-0 top-full mt-1 z-20 max-w-sm text-xs leading-relaxed px-2 py-1.5 rounded-[8px] border shadow', isDarkTheme ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-gray-200 text-gray-700')}>
+                                        {summary}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
-                          );
-                        })}
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>

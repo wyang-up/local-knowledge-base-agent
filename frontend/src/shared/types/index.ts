@@ -49,6 +49,22 @@ export interface MessageSource {
   chunkIndex?: number;
   docName: string;
   content: string;
+  originStart?: string;
+  originEnd?: string;
+  pageStart?: number;
+  pageEnd?: number;
+  textQuote?: string;
+  textOffsetStart?: number;
+  textOffsetEnd?: number;
+  sheetId?: string;
+  sheetName?: string;
+  rowStart?: number;
+  rowEnd?: number;
+  columnStart?: number;
+  columnEnd?: number;
+  jsonPath?: string;
+  nodeStartOffset?: number;
+  nodeEndOffset?: number;
 }
 
 export interface Message {

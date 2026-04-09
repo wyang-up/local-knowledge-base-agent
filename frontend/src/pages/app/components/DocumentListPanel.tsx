@@ -2,10 +2,11 @@ import {useEffect, useRef, useState} from 'react';
 import {format} from 'date-fns';
 import {CheckCircle2, CircleX, Eye, File, FileSpreadsheet, Folder, Loader2, Trash2, UploadCloud} from 'lucide-react';
 import {cn} from '../../../shared/lib/utils';
-import type {Chunk, Document} from '../../../shared/types';
+import type {Chunk, Document, MessageSource} from '../../../shared/types';
 import {DocumentPreviewContent} from './preview/DocumentPreviewContent';
 import {LegacyChunkPreviewModal} from './preview/LegacyChunkPreviewModal';
 import {PreviewModal} from './preview/PreviewModal';
+import {normalizeSourceHighlightTarget} from './preview/source-highlight-target';
 import {useDocumentPreviewResource} from './preview/useDocumentPreviewResource';
 
 export type DocumentListLocale = {
@@ -110,15 +111,64 @@ function shouldUseLegacyPreview(docType: string | null | undefined, flags: Previ
   return false;
 }
 
+function resolvePreviewSizePreset(docType: string | null | undefined): 'default' | 'a4' {
+  const normalized = (docType || '').trim().toLowerCase();
+  if (normalized === '.pdf' || normalized === 'pdf' || normalized === '.doc' || normalized === 'doc' || normalized === '.docx' || normalized === 'docx') {
+    return 'a4';
+  }
+  return 'default';
+}
+
+function resolvePreviewViewportPreset(docType: string | null | undefined): 'default' | 'a4' {
+  const normalized = (docType || '').trim().toLowerCase();
+  if (
+    normalized === '.pdf'
+    || normalized === 'pdf'
+    || normalized === '.doc'
+    || normalized === 'doc'
+    || normalized === '.docx'
+    || normalized === 'docx'
+    || normalized === '.txt'
+    || normalized === 'txt'
+    || normalized === '.json'
+    || normalized === 'json'
+    || normalized === '.md'
+    || normalized === 'md'
+    || normalized === '.markdown'
+    || normalized === 'markdown'
+    || normalized === '.log'
+    || normalized === 'log'
+  ) {
+    return 'a4';
+  }
+  return 'default';
+}
+
 type DocumentListPanelProps = {
   isDarkTheme: boolean;
   language: 'zh' | 'en';
   locale: DocumentListLocale;
   apiUrl: (endpoint: string) => string;
-  onOpenDetail: (doc: Document) => void;
+  onOpenDetail: (doc: Document, highlight?: {chunkId?: string; chunkIndex?: number}) => void;
+  onBackToQa?: () => void;
+  previewRequest?: MessageSource | null;
+  previewRequestDoc?: Document | null;
+  onPreviewRequestHandled?: () => void;
+  onDocumentDeleted?: (docId: string) => void;
 };
 
-export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpenDetail}: DocumentListPanelProps) {
+export function DocumentListPanel({
+  isDarkTheme,
+  language,
+  locale,
+  apiUrl,
+  onOpenDetail,
+  onBackToQa,
+  previewRequest = null,
+  previewRequestDoc = null,
+  onPreviewRequestHandled,
+  onDocumentDeleted,
+}: DocumentListPanelProps) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
@@ -126,9 +176,16 @@ export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpen
   const [newPreviewDoc, setNewPreviewDoc] = useState<Document | null>(null);
   const [legacyPreviewDoc, setLegacyPreviewDoc] = useState<Document | null>(null);
   const [legacyPreviewChunks, setLegacyPreviewChunks] = useState<Chunk[]>([]);
+  const [activePreviewSource, setActivePreviewSource] = useState<MessageSource | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<HTMLDivElement>(null);
   const legacyPreviewRequestVersionRef = useRef(0);
+  const handledPreviewRequestRef = useRef<string | null>(null);
+  const onPreviewRequestHandledRef = useRef(onPreviewRequestHandled);
+
+  useEffect(() => {
+    onPreviewRequestHandledRef.current = onPreviewRequestHandled;
+  }, [onPreviewRequestHandled]);
 
   const previewResourceState = useDocumentPreviewResource({
     apiUrl,
@@ -240,6 +297,7 @@ export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpen
   const deleteDoc = async (id: string) => {
     if (!confirm(locale.deleteDocConfirm)) return;
     await fetch(apiUrl(`/api/documents/${id}`), {method: 'DELETE'});
+    onDocumentDeleted?.(id);
     fetchDocs();
   };
 
@@ -253,7 +311,9 @@ export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpen
     }
   };
 
-  const handlePreview = async (doc: Document) => {
+  const handlePreview = async (doc: Document, source: MessageSource | null = null) => {
+    setActivePreviewSource(source);
+
     if (!shouldUseLegacyPreview(doc.type, previewFlags)) {
       legacyPreviewRequestVersionRef.current += 1;
       setLegacyPreviewDoc(null);
@@ -267,13 +327,78 @@ export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpen
 
   const closeNewPreview = () => {
     setNewPreviewDoc(null);
+    setActivePreviewSource(null);
   };
 
   const closeLegacyPreview = () => {
     legacyPreviewRequestVersionRef.current += 1;
     setLegacyPreviewDoc(null);
     setLegacyPreviewChunks([]);
+    setActivePreviewSource(null);
   };
+
+  useEffect(() => {
+    if (!previewRequest?.docId) {
+      handledPreviewRequestRef.current = null;
+      return;
+    }
+
+    const requestKey = `${previewRequest.docId}:${previewRequest.chunkId ?? ''}:${previewRequest.chunkIndex ?? ''}`;
+    if (requestKey === handledPreviewRequestRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const openFromPreviewRequest = async () => {
+      let matchedDoc = previewRequestDoc && previewRequestDoc.id === previewRequest.docId
+        ? previewRequestDoc
+        : (documents.find((doc) => doc.id === previewRequest.docId) ?? null);
+
+      if (!matchedDoc) {
+        try {
+          const response = await fetch(apiUrl(`/api/documents/${previewRequest.docId}`));
+          if (response.ok) {
+            const data = await response.json();
+            matchedDoc = {
+              id: typeof data?.id === 'string' ? data.id : previewRequest.docId,
+              name: typeof data?.name === 'string' ? data.name : (previewRequest.docName || '未知文档'),
+              size: typeof data?.size === 'number' ? data.size : 0,
+              type: typeof data?.type === 'string' ? data.type : '.txt',
+              uploadTime: typeof data?.uploadTime === 'string' ? data.uploadTime : new Date().toISOString(),
+              status: data?.status === 'processing' || data?.status === 'failed' || data?.status === 'cancelled' ? data.status : 'completed',
+              chunkCount: typeof data?.chunkCount === 'number' ? data.chunkCount : 0,
+              description: typeof data?.description === 'string' ? data.description : '',
+            };
+          }
+        } catch {
+          // ignore fallback lookup errors
+        }
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      if (!matchedDoc) {
+        window.alert('对应文档不存在或已删除，无法定位溯源。');
+        onPreviewRequestHandledRef.current?.();
+        return;
+      }
+
+      handledPreviewRequestRef.current = requestKey;
+      await handlePreview(matchedDoc, previewRequest);
+      if (!cancelled) {
+        onPreviewRequestHandledRef.current?.();
+      }
+    };
+
+    void openFromPreviewRequest();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [documents, previewRequest, apiUrl]);
 
   return (
     <div className={`flex-1 flex flex-col p-6 overflow-hidden ${isDarkTheme ? 'bg-slate-950' : 'bg-gray-50'}`}>
@@ -378,7 +503,7 @@ export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpen
                   </td>
                   <td className="py-4 px-6 text-left">
                     <div className="flex items-center justify-start gap-2">
-                      <button type="button" onClick={() => handlePreview(doc)} className={cn('p-1.5 rounded transition-colors', isDarkTheme ? 'text-slate-400 hover:text-sky-300 hover:bg-slate-800' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50')} title={locale.previewAction} aria-label={locale.previewAction}>
+                      <button type="button" onClick={() => handlePreview(doc, null)} className={cn('p-1.5 rounded transition-colors', isDarkTheme ? 'text-slate-400 hover:text-sky-300 hover:bg-slate-800' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50')} title={locale.previewAction} aria-label={locale.previewAction}>
                         <Eye size={16} />
                       </button>
                       <button
@@ -432,17 +557,30 @@ export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpen
         type={newPreviewDoc?.type ?? null}
         uploadTime={newPreviewDoc?.uploadTime ?? null}
         chunkCount={newPreviewDoc?.chunkCount ?? null}
+        sizePreset={resolvePreviewSizePreset(newPreviewDoc?.type)}
+        viewportPreset={resolvePreviewViewportPreset(newPreviewDoc?.type)}
+        contentPadding={(
+          newPreviewDoc?.type?.toLowerCase() === '.pdf'
+          || newPreviewDoc?.type?.toLowerCase() === '.doc'
+          || newPreviewDoc?.type?.toLowerCase() === '.docx'
+          || newPreviewDoc?.type?.toLowerCase() === '.txt'
+          || newPreviewDoc?.type?.toLowerCase() === '.json'
+        ) ? 'none' : 'default'}
         onClose={closeNewPreview}
         onViewDetails={newPreviewDoc
           ? () => {
             closeNewPreview();
-            onOpenDetail(newPreviewDoc);
+            onOpenDetail(newPreviewDoc, activePreviewSource && activePreviewSource.docId === newPreviewDoc.id
+              ? {chunkId: activePreviewSource.chunkId, chunkIndex: activePreviewSource.chunkIndex}
+              : undefined);
           }
           : undefined}
         onLocateChunk={newPreviewDoc
           ? () => {
             closeNewPreview();
-            onOpenDetail(newPreviewDoc);
+            onOpenDetail(newPreviewDoc, activePreviewSource && activePreviewSource.docId === newPreviewDoc.id
+              ? {chunkId: activePreviewSource.chunkId, chunkIndex: activePreviewSource.chunkIndex}
+              : undefined);
           }
           : undefined}
         labels={{
@@ -465,6 +603,16 @@ export function DocumentListPanel({isDarkTheme, language, locale, apiUrl, onOpen
           resource={previewResourceState.resource}
           loading={previewResourceState.loading}
           error={previewResourceState.error}
+          sourceHighlight={activePreviewSource && activePreviewSource.docId === newPreviewDoc?.id ? normalizeSourceHighlightTarget(activePreviewSource) : null}
+          onLocateChunk={newPreviewDoc
+            ? () => {
+              closeNewPreview();
+              onOpenDetail(newPreviewDoc, activePreviewSource && activePreviewSource.docId === newPreviewDoc.id
+                ? {chunkId: activePreviewSource.chunkId, chunkIndex: activePreviewSource.chunkIndex}
+                : undefined);
+            }
+            : undefined}
+          onBackToQa={onBackToQa}
           fallbackLabel={locale.previewLegacyFallback}
           loadingLabel={locale.previewLoading}
           errorLabel={locale.previewLoadError}

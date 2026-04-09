@@ -11,6 +11,9 @@ type PreviewModalProps = {
   onViewDetails?: () => void;
   onDownload?: () => void;
   onLocateChunk?: () => void;
+  sizePreset?: 'default' | 'a4';
+  viewportPreset?: 'default' | 'a4';
+  contentPadding?: 'default' | 'none';
   labels?: {
     viewDetails?: string;
     download?: string;
@@ -56,6 +59,9 @@ export function PreviewModal({
   onViewDetails,
   onDownload,
   onLocateChunk,
+  sizePreset = 'default',
+  viewportPreset = 'default',
+  contentPadding = 'default',
   labels,
   children,
 }: PreviewModalProps) {
@@ -95,7 +101,7 @@ export function PreviewModal({
   return (
     <div
       data-testid="preview-modal-mask"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className={`fixed inset-0 z-50 flex justify-center bg-black/50 p-4 ${viewportPreset === 'a4' ? 'items-start overflow-y-auto' : 'items-center'}`}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
@@ -106,24 +112,39 @@ export function PreviewModal({
         role="dialog"
         aria-modal="true"
         aria-label={`预览 ${fileName}`}
-        className="flex w-full max-w-[90vw] max-h-[90vh] flex-col overflow-hidden rounded-[8px] bg-white shadow-xl"
+        className={`flex flex-col overflow-hidden rounded-[8px] bg-white shadow-xl ${sizePreset === 'a4' ? 'w-[95vw] max-w-[900px]' : 'w-full max-w-[90vw]'} ${viewportPreset === 'a4' ? 'h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)]' : 'max-h-[90vh]'}`}
       >
-        <header className="flex items-center justify-between gap-4 border-b border-gray-200 px-4 py-3">
-          <h2 className="truncate text-base font-semibold text-gray-900">{fileName}</h2>
+        <header className="flex items-center justify-between gap-4 px-4 py-3 bg-[#1677FF] text-white">
+          <h2 className="truncate text-base font-semibold text-white">{fileName}</h2>
           <div className="flex items-center gap-2">
-            <button type="button" onClick={onViewDetails} className="rounded border border-gray-200 px-2 py-1 text-sm text-gray-700" disabled={!onViewDetails}>
+            <button
+              type="button"
+              onClick={onViewDetails}
+              className="rounded border border-white/35 bg-white/10 px-2 py-1 text-sm text-white transition-colors hover:bg-white/20"
+              disabled={!onViewDetails}
+            >
               {resolvedLabels.viewDetails}
             </button>
-            <button type="button" onClick={onDownload} className="rounded border border-gray-200 px-2 py-1 text-sm text-gray-700" disabled={!onDownload}>
+            <button
+              type="button"
+              onClick={onDownload}
+              className="rounded border border-white/35 bg-white/10 px-2 py-1 text-sm text-white transition-colors hover:bg-white/20"
+              disabled={!onDownload}
+            >
               {resolvedLabels.download}
             </button>
-            <button type="button" onClick={onClose} className="rounded border border-gray-200 px-2 py-1 text-sm text-gray-700" aria-label={resolvedLabels.closeAriaLabel}>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded border border-white/35 bg-white/10 px-2 py-1 text-sm text-white transition-colors hover:bg-white/20"
+              aria-label={resolvedLabels.closeAriaLabel}
+            >
               {resolvedLabels.close}
             </button>
           </div>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-auto px-4 py-3">{children}</main>
+        <main className={`min-h-0 flex-1 overflow-hidden ${contentPadding === 'none' ? '' : 'px-4 py-3'}`}>{children}</main>
 
         <footer className="flex flex-wrap items-center gap-4 border-t border-gray-200 px-4 py-3 text-sm text-gray-600">
           <span>{resolvedLabels.metaSize}: {formatBytes(size)}</span>

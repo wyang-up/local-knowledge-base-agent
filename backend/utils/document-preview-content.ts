@@ -47,30 +47,65 @@ export type PreviewErrorPayload = {
   };
 };
 
-const SINGLE_RANGE_PATTERN = /^bytes=(\d+)-(\d+)$/;
+const SINGLE_RANGE_PATTERN = /^(\d+)-(\d+)$/;
+const OPEN_ENDED_RANGE_PATTERN = /^(\d+)-$/;
+const SUFFIX_RANGE_PATTERN = /^-(\d+)$/;
 
 export function parseSingleRangeHeader(rangeHeader: string | null | undefined, totalBytes: number): PreviewRangeParseResult {
   if (rangeHeader == null) {
     return null;
   }
 
-  const match = rangeHeader.trim().match(SINGLE_RANGE_PATTERN);
-  if (!match) {
+  if (!Number.isInteger(totalBytes) || totalBytes <= 0) {
     return 'invalid';
   }
 
-  const start = Number(match[1]);
-  const end = Number(match[2]);
-
-  if (!Number.isInteger(start) || !Number.isInteger(end)) {
+  const normalized = rangeHeader.trim();
+  if (!normalized.toLowerCase().startsWith('bytes=')) {
     return 'invalid';
   }
 
-  if (start < 0 || end < start || end >= totalBytes) {
+  const rangeValue = normalized.slice(6).trim();
+  if (!rangeValue || rangeValue.includes(',')) {
     return 'invalid';
   }
 
-  return { start, end };
+  const exact = rangeValue.match(SINGLE_RANGE_PATTERN);
+  if (exact) {
+    const start = Number(exact[1]);
+    const end = Number(exact[2]);
+
+    if (!Number.isInteger(start) || !Number.isInteger(end)) {
+      return 'invalid';
+    }
+
+    if (start < 0 || end < start || end >= totalBytes) {
+      return 'invalid';
+    }
+
+    return { start, end };
+  }
+
+  const openEnded = rangeValue.match(OPEN_ENDED_RANGE_PATTERN);
+  if (openEnded) {
+    const start = Number(openEnded[1]);
+    if (!Number.isInteger(start) || start < 0 || start >= totalBytes) {
+      return 'invalid';
+    }
+    return { start, end: totalBytes - 1 };
+  }
+
+  const suffix = rangeValue.match(SUFFIX_RANGE_PATTERN);
+  if (suffix) {
+    const suffixLength = Number(suffix[1]);
+    if (!Number.isInteger(suffixLength) || suffixLength <= 0) {
+      return 'invalid';
+    }
+    const clampedLength = Math.min(suffixLength, totalBytes);
+    return { start: totalBytes - clampedLength, end: totalBytes - 1 };
+  }
+
+  return 'invalid';
 }
 
 export function buildPreviewResponsePlan(rangeHeader: string | null | undefined, totalBytes: number): PreviewResponsePlan {

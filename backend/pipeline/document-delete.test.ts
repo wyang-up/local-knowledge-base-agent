@@ -17,6 +17,7 @@ describe('document-delete', () => {
 
     const chunkTable = { delete: vi.fn().mockResolvedValue(undefined) };
     const clearDocumentData = vi.fn().mockResolvedValue(undefined);
+    const clearDocumentArtifacts = vi.fn().mockResolvedValue(undefined);
     const deleteDocumentRow = vi.fn().mockResolvedValue(undefined);
 
     await deleteDocumentResources({
@@ -24,11 +25,13 @@ describe('document-delete', () => {
       filePath: tmpFile,
       chunkTable,
       clearDocumentData,
+      clearDocumentArtifacts,
       deleteDocumentRow,
     });
 
     expect(chunkTable.delete).toHaveBeenCalledWith("docId = 'doc-1'");
     expect(clearDocumentData).toHaveBeenCalledWith('doc-1');
+    expect(clearDocumentArtifacts).toHaveBeenCalledWith('doc-1');
     expect(deleteDocumentRow).toHaveBeenCalledWith('doc-1');
     expect(fs.existsSync(tmpFile)).toBe(false);
   });

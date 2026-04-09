@@ -159,12 +159,12 @@ describe('QAPagePanel', () => {
     );
 
     expect(screen.getByRole('button', {name: '展开溯源'})).toBeInTheDocument();
-    expect(screen.queryByText('销售报表.xlsx - 第1分块')).not.toBeInTheDocument();
+    expect(screen.queryByText('销售报表.xlsx-第1分块')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', {name: '展开溯源'}));
 
-    expect(screen.getByText('销售报表.xlsx - 第1分块')).toBeInTheDocument();
-    expect(screen.queryByText('ignored.pdf - 第1分块')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', {name: '销售报表.xlsx-第1分块'})).toBeInTheDocument();
+    expect(screen.queryByText('ignored.pdf-第1分块')).not.toBeInTheDocument();
   });
 
   it('renders centered non-editable conversation title', () => {
@@ -325,7 +325,7 @@ describe('QAPagePanel', () => {
     );
 
     fireEvent.click(screen.getByRole('button', {name: '展开溯源'}));
-    fireEvent.mouseEnter(screen.getByRole('button', {name: '销售报表.xlsx - 第1分块'}));
+    fireEvent.mouseEnter(screen.getByRole('button', {name: /销售报表\.xlsx-第1分块/}));
 
     expect(screen.getByText('这是来源预览内容')).toBeInTheDocument();
   });

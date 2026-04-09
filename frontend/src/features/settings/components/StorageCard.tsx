@@ -19,6 +19,7 @@ interface StorageCardProps {
   documentStatsText: string;
   vectorHint: string;
   documentHint: string;
+  storageLocked?: boolean;
 }
 
 export default function StorageCard({
@@ -39,6 +40,7 @@ export default function StorageCard({
   documentStatsText,
   vectorHint,
   documentHint,
+  storageLocked = false,
 }: StorageCardProps) {
   const isDark = appTheme === 'dark';
   const sectionLabel = appLanguage === 'en' ? 'Storage Config' : '存储配置';
@@ -63,11 +65,12 @@ export default function StorageCard({
               value={vectorStoragePath}
               aria-label="存储路径"
               onChange={(event) => onVectorPathChange(event.target.value)}
+              disabled={storageLocked}
               className={`w-full rounded-lg border px-3 py-2 font-mono text-xs ${isDark ? 'border-slate-700 bg-slate-950 text-slate-100' : 'border-slate-300 bg-white text-slate-900'}`}
             />
           </label>
           <div className="mt-2 flex flex-wrap gap-2">
-            <button type="button" onClick={onPickVectorDirectory} className={`rounded-lg border px-3 py-1.5 text-sm ${isDark ? 'border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>选择目录</button>
+            <button type="button" onClick={onPickVectorDirectory} disabled={storageLocked} className={`rounded-lg border px-3 py-1.5 text-sm ${isDark ? 'border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed'}`}>选择目录</button>
             <button type="button" onClick={onOpenVectorStorage} className={`rounded-lg border px-3 py-1.5 text-sm ${isDark ? 'border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>打开目录</button>
             <button type="button" onClick={onClearVectorCache} className={`rounded-lg border px-3 py-1.5 text-sm ${isDark ? 'border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>清理缓存</button>
           </div>
@@ -83,11 +86,12 @@ export default function StorageCard({
               value={documentStoragePath}
               aria-label="文档目录路径"
               onChange={(event) => onDocumentPathChange(event.target.value)}
+              disabled={storageLocked}
               className={`w-full rounded-lg border px-3 py-2 font-mono text-xs ${isDark ? 'border-slate-700 bg-slate-950 text-slate-100' : 'border-slate-300 bg-white text-slate-900'}`}
             />
           </label>
           <div className="mt-2 flex flex-wrap gap-2">
-            <button type="button" onClick={onPickDocumentDirectory} className={`rounded-lg border px-3 py-1.5 text-sm ${isDark ? 'border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>选择目录</button>
+            <button type="button" onClick={onPickDocumentDirectory} disabled={storageLocked} className={`rounded-lg border px-3 py-1.5 text-sm ${isDark ? 'border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed'}`}>选择目录</button>
             <button type="button" onClick={onOpenDocumentStorage} className={`rounded-lg border px-3 py-1.5 text-sm ${isDark ? 'border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>打开目录</button>
           </div>
           {documentStatsText && <p className={`mt-2 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{documentStatsText}</p>}

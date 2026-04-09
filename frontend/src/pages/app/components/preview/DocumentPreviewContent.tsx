@@ -1,4 +1,5 @@
 import {useEffect, useMemo, useRef} from 'react';
+import type {SourceHighlightTarget} from './source-highlight-target';
 import type {DocumentPreviewError, DocumentPreviewResource} from './preview-types';
 import {JsonPreview} from './renderers/JsonPreview';
 import {PdfPreview} from './renderers/PdfPreview';
@@ -176,11 +177,67 @@ type DocumentPreviewContentProps = ResolvePreviewTypeInput & {
   resource?: DocumentPreviewResource | null;
   loading?: boolean;
   error?: DocumentPreviewError | null;
+  sourceHighlight?: SourceHighlightTarget | null;
+  onLocateChunk?: () => void;
+  onBackToQa?: () => void;
   fallbackLabel?: string;
   loadingLabel?: string;
   errorLabel?: string;
   onFallback?: (result: ResolvePreviewTypeResult) => void;
 };
+
+type PreviewSourceHighlight = SourceHighlightTarget | null;
+
+function SourceHighlightBanner({
+  sourceHighlight,
+  onLocateChunk,
+  onBackToQa,
+}: {
+  sourceHighlight: PreviewSourceHighlight;
+  onLocateChunk?: () => void;
+  onBackToQa?: () => void;
+}) {
+  const sourceSummary = sourceHighlight?.content?.trim() || '';
+  if (!sourceSummary) {
+    return null;
+  }
+
+  const sourceChunkLabel = typeof sourceHighlight?.chunkIndex === 'number'
+    ? `第${sourceHighlight.chunkIndex + 1}分块`
+    : '目标分块';
+
+  return (
+    <div className="mb-2 rounded-[8px] border border-[#E8C95A] bg-[#FFF7CC] px-3 py-2 text-xs text-gray-800">
+      <div className="flex items-center justify-between gap-2">
+        <p className="truncate">
+          <strong className="mr-1">溯源定位：</strong>
+          <span className="mr-2">{sourceChunkLabel}</span>
+          <span>{sourceSummary}</span>
+        </p>
+        <div className="shrink-0 flex items-center gap-2">
+          {onLocateChunk ? (
+            <button
+              type="button"
+              onClick={onLocateChunk}
+              className="rounded-[8px] border border-[#1677FF]/35 px-2 py-1 text-[#1677FF] hover:bg-blue-50"
+            >
+              跳转详情
+            </button>
+          ) : null}
+          {onBackToQa ? (
+            <button
+              type="button"
+              onClick={onBackToQa}
+              className="rounded-[8px] border border-[#1677FF]/35 px-2 py-1 text-[#1677FF] hover:bg-blue-50"
+            >
+              返回AI回答
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function asObject(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -303,6 +360,9 @@ export function DocumentPreviewContent({
   resource,
   loading = false,
   error = null,
+  sourceHighlight = null,
+  onLocateChunk,
+  onBackToQa,
   fallbackLabel = 'Legacy fallback',
   loadingLabel = '预览加载中...',
   errorLabel = '预览加载失败，请稍后重试。',
@@ -364,28 +424,47 @@ export function DocumentPreviewContent({
   if (resolved.resolvedType === 'pdf') {
     const src = toPdfSrc(resource?.content);
     return (
-      <PdfPreview
-        src={src}
-        isPartialPreview={Boolean(resource?.isPartialPreview)}
-        totalPages={resource?.totalPages ?? null}
-        errorMessage={!src ? '缺少可用的 PDF 地址' : (resource?.errorMessage ?? undefined)}
-      />
+      <section className="h-full min-h-0 flex flex-col">
+        <SourceHighlightBanner sourceHighlight={sourceHighlight} onLocateChunk={onLocateChunk} onBackToQa={onBackToQa} />
+        <PdfPreview
+          src={src}
+          isPartialPreview={Boolean(resource?.isPartialPreview)}
+          sourceHighlight={sourceHighlight}
+          errorMessage={!src ? '缺少可用的 PDF 地址' : (resource?.errorMessage ?? undefined)}
+        />
+      </section>
     );
   }
 
   if (resolved.resolvedType === 'table') {
     return (
-      <TablePreview
-        sheets={toTableSheets(resource?.content)}
-        isPartialPreview={Boolean(resource?.isPartialPreview)}
-        errorMessage={resource?.errorMessage ?? undefined}
-      />
+      <section className="h-full min-h-0 flex flex-col">
+        <SourceHighlightBanner sourceHighlight={sourceHighlight} onLocateChunk={onLocateChunk} onBackToQa={onBackToQa} />
+        <TablePreview
+          sheets={toTableSheets(resource?.content)}
+          sourceHighlight={sourceHighlight}
+          onSourceBlockClick={onLocateChunk}
+          onSourceBlockAuxClick={onBackToQa}
+          isPartialPreview={Boolean(resource?.isPartialPreview)}
+          errorMessage={resource?.errorMessage ?? undefined}
+        />
+      </section>
     );
   }
 
   if (resolved.resolvedType === 'json') {
-    return <JsonPreview value={resource?.content} isPartialPreview={Boolean(resource?.isPartialPreview)} errorMessage={resource?.errorMessage ?? undefined} />;
+    return (
+      <section className="h-full min-h-0 flex flex-col">
+        <SourceHighlightBanner sourceHighlight={sourceHighlight} onLocateChunk={onLocateChunk} onBackToQa={onBackToQa} />
+        <JsonPreview value={resource?.content} sourceHighlight={sourceHighlight} onSourceBlockClick={onLocateChunk} onSourceBlockAuxClick={onBackToQa} isPartialPreview={Boolean(resource?.isPartialPreview)} errorMessage={resource?.errorMessage ?? undefined} />
+      </section>
+    );
   }
 
-  return <TextPreview text={toText(resource?.content)} isPartialPreview={Boolean(resource?.isPartialPreview)} errorMessage={resource?.errorMessage ?? undefined} />;
+  return (
+    <section className="h-full min-h-0 flex flex-col">
+      <SourceHighlightBanner sourceHighlight={sourceHighlight} onLocateChunk={onLocateChunk} onBackToQa={onBackToQa} />
+      <TextPreview text={toText(resource?.content)} sourceHighlight={sourceHighlight} onSourceBlockClick={onLocateChunk} onSourceBlockAuxClick={onBackToQa} isPartialPreview={Boolean(resource?.isPartialPreview)} errorMessage={resource?.errorMessage ?? undefined} />
+    </section>
+  );
 }

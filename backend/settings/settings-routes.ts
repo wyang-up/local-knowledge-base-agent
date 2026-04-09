@@ -26,6 +26,7 @@ export type RegisterSettingsRoutesOptions = {
   documentStoragePath?: string;
   getRuntimeConfig: (db: any) => Promise<RuntimeConfig>;
   keySecurity?: KeySecurityService;
+  lockStoragePath?: boolean;
 };
 
 export function registerSettingsRoutes(app: express.Express, db: any, options: RegisterSettingsRoutesOptions) {
@@ -54,6 +55,7 @@ export function registerSettingsRoutes(app: express.Express, db: any, options: R
       storagePath: config.storagePath,
       documentStoragePath: config.documentStoragePath,
       readOnly: true,
+      storagePathLocked: Boolean(options.lockStoragePath),
       hasApiKey: Boolean(config.apiKey),
     });
   });
@@ -326,6 +328,17 @@ export function registerSettingsRoutes(app: express.Express, db: any, options: R
     try {
       const audit = createSettingsAuditContext(req);
       const settingsStore = await settingsStorePromise;
+
+       if (options.lockStoragePath) {
+        const all = await settingsStore.getAllConfig();
+        return res.status(403).json({
+          error: 'storage path is locked by server',
+          code: 'STORAGE_PATH_LOCKED',
+          storage: all.storage,
+          audit,
+        });
+      }
+
       const expectedVersion = parseExpectedVersion(req.body?.expectedVersion);
       const storage = await settingsStore.patchStorageConfig(
         {

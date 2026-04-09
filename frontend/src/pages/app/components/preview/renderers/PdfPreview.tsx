@@ -1,117 +1,70 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useMemo} from 'react';
+import type {SourceHighlightTarget} from '../source-highlight-target';
+
+type SourceHighlight = SourceHighlightTarget | null;
 
 type PdfPreviewProps = {
   src: string;
   isPartialPreview?: boolean;
   errorMessage?: string;
-  totalPages?: number | null;
+  sourceHighlight?: SourceHighlight;
+  onSourceBlockClick?: () => void;
 };
 
-const MIN_ZOOM = 50;
-const MAX_ZOOM = 300;
-const ZOOM_STEP = 10;
-
-function clampZoom(value: number): number {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
-}
-
-function buildPdfViewerUrl(src: string, page: number, zoom: number): string {
-  const separator = src.includes('#') ? '&' : '#';
-  return `${src}${separator}page=${page}&zoom=${zoom}`;
-}
-
-function normalizeTotalPages(totalPages: number | null | undefined): number | null {
-  if (!Number.isFinite(totalPages) || !totalPages || totalPages < 1) {
-    return null;
+function sanitizePdfSource(src: string): string {
+  const hashIndex = src.indexOf('#');
+  if (hashIndex < 0) {
+    return src;
   }
-  return Math.floor(totalPages);
+  return src.slice(0, hashIndex);
 }
 
-export function PdfPreview({src, isPartialPreview = false, errorMessage, totalPages = null}: PdfPreviewProps) {
-  const [page, setPage] = useState(1);
-  const [zoom, setZoom] = useState(100);
-  const knownTotalPages = useMemo(() => normalizeTotalPages(totalPages), [totalPages]);
-  const isNextPageDisabled = knownTotalPages !== null && page >= knownTotalPages;
-
-  useEffect(() => {
-    setPage(1);
-    setZoom(100);
-  }, [src]);
-
-  useEffect(() => {
-    if (knownTotalPages !== null && page > knownTotalPages) {
-      setPage(knownTotalPages);
-    }
-  }, [knownTotalPages, page]);
-
-  const viewerUrl = useMemo(() => buildPdfViewerUrl(src, page, zoom), [src, page, zoom]);
-
-  if (errorMessage) {
-    return (
-      <div role="alert" data-testid="pdf-preview-error">
-        <p>PDF 预览失败，请稍后重试。</p>
-        <p>{errorMessage}</p>
-      </div>
-    );
+function buildSearchKeyword(sourceHighlight: SourceHighlight): string {
+  const preferred = sourceHighlight?.textQuote?.trim() || sourceHighlight?.content?.trim() || '';
+  if (!preferred) {
+    return '';
   }
+
+  return preferred
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
+function buildPdfViewerUrl(src: string, sourceHighlight: SourceHighlight): string {
+  const base = sanitizePdfSource(src);
+  const page = typeof sourceHighlight?.pageStart === 'number' && sourceHighlight.pageStart > 0
+    ? sourceHighlight.pageStart
+    : 1;
+  const search = buildSearchKeyword(sourceHighlight);
+
+  const hashParams: string[] = ['toolbar=0', 'navpanes=0', 'statusbar=0', 'messages=0'];
+  hashParams.push(`page=${page}`);
+  hashParams.push('zoom=page-width');
+  if (search) {
+    hashParams.push(`search=${encodeURIComponent(search)}`);
+  }
+
+  return `${base}#${hashParams.join('&')}`;
+}
+
+export function PdfPreview({src, isPartialPreview = false, errorMessage, sourceHighlight = null}: PdfPreviewProps) {
+  const viewerUrl = useMemo(() => buildPdfViewerUrl(src, sourceHighlight), [src, sourceHighlight]);
 
   return (
-    <section data-testid="pdf-preview-renderer">
-      <div>
-        <button
-          type="button"
-          onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))}
-          disabled={page <= 1}
-        >
-          上一页
-        </button>
-        <label htmlFor="pdf-preview-page-input">页码</label>
-        <input
-          id="pdf-preview-page-input"
-          type="number"
-          min={1}
-          max={knownTotalPages ?? undefined}
-          value={page}
-          onChange={(event) => {
-            const nextPage = Number.parseInt(event.target.value, 10);
-            if (Number.isNaN(nextPage) || nextPage < 1) {
-              return;
-            }
-            if (knownTotalPages !== null && nextPage > knownTotalPages) {
-              return;
-            }
-            setPage(nextPage);
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => {
-            setPage((currentPage) => {
-              if (knownTotalPages !== null) {
-                return Math.min(knownTotalPages, currentPage + 1);
-              }
-              return currentPage + 1;
-            });
-          }}
-          disabled={isNextPageDisabled}
-        >
-          下一页
-        </button>
-      </div>
-
-      <div>
-        <button type="button" onClick={() => setZoom((currentZoom) => clampZoom(currentZoom - ZOOM_STEP))}>
-          缩小
-        </button>
-        <span>{zoom}%</span>
-        <button type="button" onClick={() => setZoom((currentZoom) => clampZoom(currentZoom + ZOOM_STEP))}>
-          放大
-        </button>
-      </div>
-
-      {isPartialPreview ? <p>当前仅展示部分预览内容。</p> : null}
-
-      <iframe title="PDF 预览内容" src={viewerUrl} style={{width: '100%', minHeight: 480}} />
+    <section data-testid="pdf-preview-renderer" className="h-full min-h-0 flex flex-col">
+      {errorMessage ? (
+        <div role="alert" data-testid="pdf-preview-error" className="mb-2 rounded-[8px] border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p>PDF 预览失败，请稍后重试。</p>
+          <p>{errorMessage}</p>
+        </div>
+      ) : null}
+      {isPartialPreview ? <p className="shrink-0 text-xs text-gray-600">当前仅展示部分预览内容。</p> : null}
+      <iframe
+        title="PDF 预览内容"
+        src={viewerUrl}
+        className="mt-2 w-full flex-1 min-h-0 border-0 rounded-[8px] bg-white"
+      />
     </section>
   );
 }

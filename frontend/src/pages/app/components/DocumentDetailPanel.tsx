@@ -45,6 +45,7 @@ type DocumentDetailPanelProps = {
   onOpenSettings: () => void;
   onRechunk?: () => void;
   onExportChunks?: () => void;
+  onBackToQa?: () => void;
 };
 
 type OutlineNode = {
@@ -219,6 +220,7 @@ export function DocumentDetailPanel({
   onOpenSettings,
   onRechunk,
   onExportChunks,
+  onBackToQa,
 }: DocumentDetailPanelProps) {
   const highlightedRef = useRef<HTMLDivElement | null>(null);
   const chunkRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -465,6 +467,15 @@ export function DocumentDetailPanel({
                         <span className={cn('text-xs px-2 py-0.5 rounded-md border', isDarkTheme ? 'text-emerald-300 border-emerald-700' : 'text-emerald-600 border-emerald-200 bg-emerald-50')}>
                           {locale.detailCopySuccess ?? '复制成功'}
                         </span>
+                      )}
+                      {isHighlighted && onBackToQa && (
+                        <button
+                          type="button"
+                          onClick={onBackToQa}
+                          className={cn('text-xs px-2 py-1 rounded-[8px] border ml-1', isDarkTheme ? 'text-sky-200 border-sky-700 hover:bg-slate-700' : 'text-[#1677FF] border-[#1677FF]/35 hover:bg-blue-50')}
+                        >
+                          返回AI回答
+                        </button>
                       )}
                     </div>
 

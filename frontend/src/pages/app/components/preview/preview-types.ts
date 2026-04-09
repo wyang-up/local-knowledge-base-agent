@@ -1,3 +1,5 @@
+import type {SourceHighlightTarget} from './source-highlight-target';
+
 export type PreviewOpenOptions = {
   chunkId?: string;
   page?: number;
@@ -5,6 +7,8 @@ export type PreviewOpenOptions = {
   sheetName?: string;
   jsonPath?: string;
 };
+
+export type {SourceHighlightTarget};
 
 export type PreviewErrorCode =
   | 'PREVIEW_ABORTED'

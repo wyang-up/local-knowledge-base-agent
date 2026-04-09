@@ -2,8 +2,9 @@ import {fireEvent, render, screen} from '@testing-library/react';
 import {describe, expect, it, vi} from 'vitest';
 import {DocumentDetailPanel} from './DocumentDetailPanel';
 
-Object.assign(navigator, {
-  clipboard: {
+Object.defineProperty(navigator, 'clipboard', {
+  configurable: true,
+  value: {
     writeText: vi.fn().mockResolvedValue(undefined),
   },
 });
@@ -56,6 +57,8 @@ describe('DocumentDetailPanel', () => {
   });
 
   it('highlights matched chunk when clicking outline item', () => {
+    const onBackToQa = vi.fn();
+
     render(
       <DocumentDetailPanel
         isDarkTheme={false}
@@ -91,12 +94,14 @@ describe('DocumentDetailPanel', () => {
         onSaveDescription={vi.fn()}
         onBack={vi.fn()}
         onOpenSettings={vi.fn()}
+        highlightedChunkId="c2"
+        onBackToQa={onBackToQa}
       />,
     );
 
-    fireEvent.click(screen.getAllByText('第二章')[0]!);
-
     expect(screen.getByTestId('detail-chunk-c2').className).toContain('ring-2');
+    fireEvent.click(screen.getByRole('button', {name: '返回AI回答'}));
+    expect(onBackToQa).toHaveBeenCalledTimes(1);
   });
 
   it('saves description when textarea loses focus', () => {

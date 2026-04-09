@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {Loader2} from 'lucide-react';
 import { cn } from '../../shared/lib/utils';
 import { parseMcpJsonLineBuffer } from '../../shared/lib/mcp-stream';
@@ -252,7 +252,10 @@ export default function App() {
   const [currentView, setCurrentView] = useState('list');
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
   const [highlightedSource, setHighlightedSource] = useState<{chunkId?: string; chunkIndex?: number} | null>(null);
+  const [previewSource, setPreviewSource] = useState<MessageSource | null>(null);
+  const [previewSourceDoc, setPreviewSourceDoc] = useState<Document | null>(null);
   const [detailBackTab, setDetailBackTab] = useState<'documents' | 'qa'>('documents');
+  const qaScrollPositionsRef = useRef<Record<string, number>>({});
   const [settings, setSettings] = useState<AppSettings>({
     language: 'zh',
     baseUrl: 'https://api.siliconflow.cn/v1',
@@ -273,15 +276,20 @@ export default function App() {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>('siliconflow');
   const [providerModelsByProvider, setProviderModelsByProvider] = useState<Record<ProviderKey, ProviderModelItem[]>>(fallbackProviderModelsMap);
   const [providerActionHint, setProviderActionHint] = useState('');
+  const [hasAnyApiKeyConfigured, setHasAnyApiKeyConfigured] = useState(false);
   const [revealedApiKeys, setRevealedApiKeys] = useState<Partial<Record<ProviderKey, string>>>({});
   const [revealedProviderSet, setRevealedProviderSet] = useState<Set<ProviderKey>>(new Set());
   const [storageStats, setStorageStats] = useState<{ cacheSizeBytes: number; freeSpaceBytes: number } | null>(null);
   const [documentStorageStats, setDocumentStorageStats] = useState<{ cacheSizeBytes: number; freeSpaceBytes: number } | null>(null);
   const [vectorStorageHint, setVectorStorageHint] = useState('');
   const [documentStorageHint, setDocumentStorageHint] = useState('');
+  const [storagePathLocked, setStoragePathLocked] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>(initialQaState.conversations);
   const [activeConversationId, setActiveConversationId] = useState<string>(initialQaState.activeConversationId);
   const activeProviderDraft = draft.providers.find((provider) => provider.providerId === activeProvider) ?? draft.providers[0];
+  const activeProviderHasStoredKey =
+    (typeof activeProviderDraft?.apiKey === 'string' && activeProviderDraft.apiKey.trim().length > 0)
+    || hasAnyApiKeyConfigured;
   const activeProviderApiKey = revealedProviderSet.has(activeProvider)
     ? (revealedApiKeys[activeProvider] ?? activeProviderDraft?.apiKey ?? '')
     : (activeProviderDraft?.apiKey ?? '');
@@ -724,12 +732,106 @@ export default function App() {
   };
 
   useEffect(() => {
-    qaScrollRef.current?.scrollTo(0, qaScrollRef.current.scrollHeight);
+    if (activeTab !== 'qa' || currentView !== 'list') {
+      return;
+    }
+
+    const node = qaScrollRef.current;
+    if (!node || !activeConversationId) {
+      return;
+    }
+
+    const current = qaScrollRef.current;
+    if (!current) {
+      return;
+    }
+
+    const nearBottom = Math.abs((current.scrollTop + current.clientHeight) - current.scrollHeight) < 24;
+    const hasRemembered = typeof qaScrollPositionsRef.current[activeConversationId] === 'number';
+    if (nearBottom || !hasRemembered) {
+      current.scrollTop = current.scrollHeight;
+      qaScrollPositionsRef.current[activeConversationId] = current.scrollTop;
+    }
   }, [qaMessages]);
 
-  const goToDetail = (doc: Document) => {
+  useLayoutEffect(() => {
+    const node = qaScrollRef.current;
+    if (!node || !activeConversationId) {
+      return;
+    }
+
+    const handleScroll = () => {
+      qaScrollPositionsRef.current[activeConversationId] = node.scrollTop;
+    };
+
+    node.addEventListener('scroll', handleScroll, {passive: true});
+    return () => {
+      node.removeEventListener('scroll', handleScroll);
+    };
+  }, [activeConversationId, activeTab, currentView]);
+
+  useEffect(() => {
+    if (activeTab !== 'qa' || currentView !== 'list') {
+      return;
+    }
+
+    const node = qaScrollRef.current;
+    if (!node) {
+      return;
+    }
+
+    const remembered = activeConversationId ? qaScrollPositionsRef.current[activeConversationId] : undefined;
+    const target = typeof remembered === 'number' ? remembered : node.scrollHeight;
+
+    node.scrollTop = target;
+  }, [activeTab, currentView, activeConversationId]);
+
+  useEffect(() => {
+    if (activeTab !== 'documents' || currentView !== 'list' || !previewSource?.docId) {
+      return;
+    }
+
+    let cancelled = false;
+    fetch(apiUrl('/api/documents'))
+      .then(async (response) => {
+        if (!response.ok) {
+          return;
+        }
+        const docs = await response.json();
+        if (cancelled || !Array.isArray(docs)) {
+          return;
+        }
+
+        const matched = docs.find((doc: any) => doc?.id === previewSource.docId);
+        if (!matched) {
+          return;
+        }
+
+        setSelectedDoc({
+          id: matched.id,
+          name: typeof matched.name === 'string' ? matched.name : (previewSource.docName || '未知文档'),
+          size: typeof matched.size === 'number' ? matched.size : 0,
+          type: typeof matched.type === 'string' ? matched.type : '.txt',
+          uploadTime: typeof matched.uploadTime === 'string' ? matched.uploadTime : new Date().toISOString(),
+          status: matched.status === 'processing' || matched.status === 'failed' || matched.status === 'cancelled' ? matched.status : 'completed',
+          chunkCount: typeof matched.chunkCount === 'number' ? matched.chunkCount : 0,
+          description: typeof matched.description === 'string' ? matched.description : '',
+        });
+      })
+      .catch(() => {
+        // ignore hydration failure for preview source
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, currentView, previewSource]);
+
+  const goToDetail = (doc: Document, highlight?: {chunkId?: string; chunkIndex?: number}) => {
     setDetailBackTab('documents');
-    setHighlightedSource(null);
+    setHighlightedSource(highlight ?? null);
+    setPreviewSource(null);
+    setPreviewSourceDoc(null);
     setSelectedDoc(doc);
     setCurrentView('detail');
   };
@@ -737,6 +839,8 @@ export default function App() {
   const goToList = () => {
     setSelectedDoc(null);
     setHighlightedSource(null);
+    setPreviewSource(null);
+    setPreviewSourceDoc(null);
     setCurrentView('list');
     setActiveTab(detailBackTab);
   };
@@ -745,27 +849,72 @@ export default function App() {
     if (!source.docId) return;
 
     setDetailBackTab('qa');
-    setHighlightedSource({
-      chunkId: source.chunkId,
-      chunkIndex: source.chunkIndex,
-    });
-    setSelectedDoc((prev) => ({
-      id: source.docId || prev?.id || '',
-      name: source.docName || prev?.name || locale.qaSourceUnknownDoc,
-      size: prev?.size ?? 0,
-      type: prev?.type ?? '.txt',
-      uploadTime: prev?.uploadTime ?? new Date().toISOString(),
-      status: prev?.status ?? 'completed',
-      chunkCount: prev?.chunkCount ?? 0,
-      description: prev?.description ?? '',
-    }));
-    setActiveTab('documents');
-    setCurrentView('detail');
+    setHighlightedSource(null);
+    setSelectedDoc(null);
+    fetch(apiUrl(`/api/documents/${source.docId}`))
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error('preview source doc load failed');
+        }
+        return response.json();
+      })
+      .then((data) => {
+        setPreviewSourceDoc({
+          id: typeof data?.id === 'string' ? data.id : source.docId!,
+          name: typeof data?.name === 'string' ? data.name : (source.docName || '未知文档'),
+          size: typeof data?.size === 'number' ? data.size : 0,
+          type: typeof data?.type === 'string' ? data.type : '.txt',
+          uploadTime: typeof data?.uploadTime === 'string' ? data.uploadTime : new Date().toISOString(),
+          status: data?.status === 'processing' || data?.status === 'failed' || data?.status === 'cancelled' ? data.status : 'completed',
+          chunkCount: typeof data?.chunkCount === 'number' ? data.chunkCount : 0,
+          description: typeof data?.description === 'string' ? data.description : '',
+        });
+        setPreviewSource(source);
+        setActiveTab('documents');
+        setCurrentView('list');
+      })
+      .catch(() => {
+        window.alert('对应文档不存在或已删除，无法定位溯源。');
+      });
   };
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     setCurrentView('list');
+  };
+
+  const backToQaFromDetail = () => {
+    setActiveTab('qa');
+    setCurrentView('list');
+  };
+
+  const backToQaFromPreview = () => {
+    setPreviewSource(null);
+    setPreviewSourceDoc(null);
+    setActiveTab('qa');
+    setCurrentView('list');
+  };
+
+  const removeSourcesForDocument = (docId: string) => {
+    const shouldResetDetail = selectedDoc?.id === docId;
+
+    setConversations((prev) => prev.map((conversation) => ({
+      ...conversation,
+      messages: conversation.messages.map((message) => ({
+        ...message,
+        sources: message.sources?.filter((source) => source.docId !== docId) ?? message.sources,
+      })),
+    })));
+
+    setPreviewSource((prev) => (prev?.docId === docId ? null : prev));
+    setPreviewSourceDoc((prev) => (prev?.id === docId ? null : prev));
+    setHighlightedSource(null);
+    setSelectedDoc((prev) => (prev?.id === docId ? null : prev));
+
+    if (shouldResetDetail) {
+      setCurrentView('list');
+      setActiveTab('documents');
+    }
   };
 
   useEffect(() => {
@@ -790,6 +939,8 @@ export default function App() {
         };
         const nextStorage = typeof data.storagePath === 'string' ? data.storagePath : './data/lance';
         const nextDocumentStorage = typeof data.documentStoragePath === 'string' ? data.documentStoragePath : latestDraft.storage.documentStoragePath;
+        const nextStorageLocked = data.storagePathLocked === true;
+        const nextHasApiKey = data.hasApiKey === true;
 
         const nextDraft: SettingsDraft = {
           ...latestDraft,
@@ -813,6 +964,13 @@ export default function App() {
           storagePath: nextStorage,
           documentStoragePath: nextDocumentStorage,
         }));
+        setStoragePathLocked(nextStorageLocked);
+        setHasAnyApiKeyConfigured(nextHasApiKey);
+
+        if (nextStorageLocked) {
+          setVectorStorageHint('向量库路径已由系统锁定到当前项目 data/lance，不可修改。');
+          setDocumentStorageHint('文档目录路径已由系统锁定，不可修改。');
+        }
       } catch {
         // Keep local fallback defaults when backend config is unavailable.
       }
@@ -1072,13 +1230,21 @@ export default function App() {
 
   // --- Page: Document List ---
   const DocumentList = () => (
-    <DocumentListPanel
+      <DocumentListPanel
       isDarkTheme={isDarkTheme}
       language={draft.ui.language as 'zh' | 'en'}
       locale={locale}
       apiUrl={apiUrl}
       onOpenDetail={goToDetail}
-    />
+      onBackToQa={detailBackTab === 'qa' ? backToQaFromPreview : undefined}
+        previewRequest={previewSource}
+        previewRequestDoc={previewSourceDoc}
+        onPreviewRequestHandled={() => {
+          setPreviewSource(null);
+          setPreviewSourceDoc(null);
+        }}
+        onDocumentDeleted={removeSourcesForDocument}
+      />
   );
 
   // --- Page: Document Detail ---
@@ -1179,6 +1345,7 @@ export default function App() {
         onOpenSettings={() => handleTabChange('settings')}
         onRechunk={handleRechunk}
         onExportChunks={handleExportChunks}
+        onBackToQa={detailBackTab === 'qa' ? backToQaFromDetail : undefined}
       />
     );
   };
@@ -1421,6 +1588,7 @@ export default function App() {
         providerLabelMap={providerLabelMap}
         activeProviderDraft={activeProviderDraft}
         activeProviderApiKey={activeProviderApiKey}
+        hasApiKeyConfigured={activeProviderHasStoredKey}
         providerModelsByProvider={providerModelsByProvider}
         fallbackProviderModelsMap={fallbackProviderModelsMap}
         revealedProviderSet={revealedProviderSet as Set<string>}
@@ -1429,6 +1597,7 @@ export default function App() {
         documentStorageHint={documentStorageHint}
         vectorStorageStatsText={vectorStorageStatsText}
         docsStorageStatsText={docsStorageStatsText}
+        storageLocked={storagePathLocked}
         settingsController={settingsController}
         updateUiFieldWithImmediateSave={updateUiFieldWithImmediateSave}
         updateProviderField={updateProviderField as any}

@@ -181,7 +181,7 @@ describe('server preview content routes', () => {
 
     const response = await fetch(`${baseUrl}/api/documents/doc-416-invalid-syntax/content`, {
       headers: {
-        Range: 'bytes=10-',
+        Range: 'bytes=abc-def',
       },
     });
     const payload: any = await response.json();

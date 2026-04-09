@@ -21,12 +21,52 @@ const LRU_CACHE_SIZE = 3;
 type PreviewKind = 'pdf' | 'table' | 'json' | 'text';
 
 type WrappedPreviewPayload = {
+  __previewWrapped?: unknown;
   mimeType?: unknown;
   content?: unknown;
   isPartialPreview?: unknown;
   totalPages?: unknown;
   errorMessage?: unknown;
 };
+
+const PREVIEW_PARSE_SCHEMA_VERSION = 'preview-parse-v3';
+
+const REPLACEMENT_CHAR = '\uFFFD';
+const SUSPICIOUS_LATIN1_PATTERN = /[\u00C0-\u00FF]/g;
+const CONTROL_CHAR_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g;
+
+function hasUtf16NullPattern(bytes: Uint8Array): boolean {
+  if (bytes.length < 6) {
+    return false;
+  }
+
+  let oddZero = 0;
+  let oddTotal = 0;
+  let evenZero = 0;
+  let evenTotal = 0;
+
+  for (let index = 0; index < bytes.length; index += 1) {
+    if (index % 2 === 0) {
+      evenTotal += 1;
+      if (bytes[index] === 0) {
+        evenZero += 1;
+      }
+    } else {
+      oddTotal += 1;
+      if (bytes[index] === 0) {
+        oddZero += 1;
+      }
+    }
+  }
+
+  if (oddTotal === 0 || evenTotal === 0) {
+    return false;
+  }
+
+  const oddZeroRatio = oddZero / oddTotal;
+  const evenZeroRatio = evenZero / evenTotal;
+  return oddZeroRatio > 0.28 || evenZeroRatio > 0.28;
+}
 
 function resolveApiUrl(apiUrl: ApiUrlResolver, endpoint: string): string {
   if (typeof apiUrl === 'function') {
@@ -139,6 +179,57 @@ function normalizeDocumentType(documentType: string | null | undefined): string 
   return (documentType || '').trim().toLowerCase();
 }
 
+function decodeWithTextDecoder(bytes: Uint8Array, encoding: string): string {
+  return new TextDecoder(encoding).decode(bytes);
+}
+
+function garbleScore(input: string): number {
+  const replacementCount = (input.match(/\uFFFD/g) ?? []).length;
+  const controlCount = (input.match(CONTROL_CHAR_PATTERN) ?? []).length;
+  const suspiciousCount = (input.match(SUSPICIOUS_LATIN1_PATTERN) ?? []).length;
+  return (replacementCount * 12) + (controlCount * 4) + suspiciousCount;
+}
+
+function decodePlainTextArrayBuffer(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return decodeWithTextDecoder(bytes.subarray(3), 'utf-8');
+  }
+
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return decodeWithTextDecoder(bytes.subarray(2), 'utf-16le');
+  }
+
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return decodeWithTextDecoder(bytes.subarray(2), 'utf-16be');
+  }
+
+  const utf8Text = decodeWithTextDecoder(bytes, 'utf-8');
+  const gb18030Text = decodeWithTextDecoder(bytes, 'gb18030');
+  const candidates: Array<{text: string; score: number}> = [
+    { text: utf8Text, score: garbleScore(utf8Text) },
+    { text: gb18030Text, score: garbleScore(gb18030Text) },
+  ];
+
+  const tryUtf16 = hasUtf16NullPattern(bytes) || utf8Text.includes('\u0000');
+  if (tryUtf16) {
+    const utf16leText = decodeWithTextDecoder(bytes, 'utf-16le');
+    const utf16beText = decodeWithTextDecoder(bytes, 'utf-16be');
+    candidates.push({ text: utf16leText, score: garbleScore(utf16leText) });
+    candidates.push({ text: utf16beText, score: garbleScore(utf16beText) });
+  }
+
+  let best = candidates[0];
+  for (let index = 1; index < candidates.length; index += 1) {
+    if (candidates[index].score < best.score) {
+      best = candidates[index];
+    }
+  }
+
+  return best.text;
+}
+
 function inferPreviewKind(documentType: string | null | undefined, mimeType: string | null | undefined): PreviewKind {
   const normalizedType = normalizeDocumentType(documentType);
   const normalizedMime = normalizeMimeType(mimeType);
@@ -177,12 +268,16 @@ function inferPreviewKind(documentType: string | null | undefined, mimeType: str
   return 'text';
 }
 
-function isWrappedPreviewPayload(value: unknown): value is WrappedPreviewPayload {
+function isWrappedPreviewPayload(value: unknown, requireExplicitMarker = false): value is WrappedPreviewPayload {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return false;
   }
 
   const payload = value as WrappedPreviewPayload;
+  if (requireExplicitMarker && payload.__previewWrapped !== true) {
+    return false;
+  }
+
   return (
     'content' in payload
     || 'mimeType' in payload
@@ -346,7 +441,7 @@ async function parseContentByKind(
       return {content: {sheets}, objectUrl: null};
     }
 
-    const text = await response.text();
+    const text = decodePlainTextArrayBuffer(await response.arrayBuffer());
     const delimiter = normalizedMime === 'text/tab-separated-values' || normalizedType === '.tsv' || normalizedType === 'tsv' ? '\t' : ',';
     const sheet = parseDelimitedTextToSheet(text, delimiter as ',' | '\t');
     return {content: {sheets: [sheet]}, objectUrl: null};
@@ -354,6 +449,9 @@ async function parseContentByKind(
 
   if (kind === 'json') {
     if (payloadContent !== undefined) {
+      if (typeof payloadContent === 'string') {
+        return {content: payloadContent, objectUrl: null};
+      }
       return {content: payloadContent, objectUrl: null};
     }
 
@@ -376,7 +474,7 @@ async function parseContentByKind(
     }
   }
 
-  return {content: await response.text(), objectUrl: null};
+  return {content: decodePlainTextArrayBuffer(await response.arrayBuffer()), objectUrl: null};
 }
 
 async function buildResource(
@@ -386,12 +484,30 @@ async function buildResource(
 ): Promise<DocumentPreviewResource> {
   const responseContentType = response.headers.get('content-type');
   const normalizedResponseMimeType = normalizeMimeType(responseContentType);
+  const normalizedType = normalizeDocumentType(documentType);
+  const preserveRawJsonDocument = normalizedType === '.json' || normalizedType === 'json';
 
   const shouldParseJsonBody = normalizedResponseMimeType === 'application/json' || normalizedResponseMimeType === 'text/json';
-  const maybePayload = shouldParseJsonBody ? await response.json() : undefined;
+  let maybePayload: unknown = undefined;
+  let rawJsonText: string | null = null;
+  if (shouldParseJsonBody) {
+    if (preserveRawJsonDocument) {
+      rawJsonText = await response.text();
+      try {
+        maybePayload = JSON.parse(rawJsonText);
+      } catch {
+        maybePayload = undefined;
+      }
+    } else {
+      maybePayload = await response.json();
+    }
+  }
 
-  const wrappedPayload = isWrappedPreviewPayload(maybePayload) ? maybePayload : null;
-  const payloadContent = wrappedPayload ? wrappedPayload.content : (shouldParseJsonBody ? maybePayload : undefined);
+  const requireExplicitWrappedMarker = preserveRawJsonDocument;
+  const wrappedPayload = isWrappedPreviewPayload(maybePayload, requireExplicitWrappedMarker) ? maybePayload : null;
+  const payloadContent = wrappedPayload
+    ? wrappedPayload.content
+    : (preserveRawJsonDocument && rawJsonText !== null ? rawJsonText : (shouldParseJsonBody ? maybePayload : undefined));
   const payloadMimeType = getNullableString(wrappedPayload?.mimeType);
   const effectiveMimeType = payloadMimeType ?? responseContentType;
   const kind = inferPreviewKind(documentType, effectiveMimeType);
@@ -434,7 +550,26 @@ export function useDocumentPreviewResource({
     }
 
     const normalizedType = documentType || 'unknown';
-    const cacheKey = `${documentId}::${normalizedType}`;
+    const kind = inferPreviewKind(normalizedType, null);
+
+    if (kind === 'pdf') {
+      const endpoint = `/api/documents/${encodeURIComponent(documentId)}/content`;
+      const resource: DocumentPreviewResource = {
+        documentId,
+        documentType: normalizedType,
+        kind: 'pdf',
+        mimeType: 'application/pdf',
+        isPartialPreview: undefined,
+        totalPages: null,
+        errorMessage: null,
+        objectUrl: null,
+        content: { src: endpoint },
+      };
+      setState({loading: false, error: null, resource});
+      return;
+    }
+
+    const cacheKey = `${documentId}::${normalizedType}::${PREVIEW_PARSE_SCHEMA_VERSION}`;
     const cached = cacheRef.current.get(cacheKey);
     if (cached) {
       updateCache(cacheRef.current, cacheKey, cached);
