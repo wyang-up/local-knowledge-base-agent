@@ -28,12 +28,8 @@ function countMatches(text: string, keyword: string): number {
 }
 
 function isCompatibleOffsetSlice(slice: string, quote: string, keyword: string): boolean {
-  if (quote) {
-    return slice === quote;
-  }
-
-  if (keyword) {
-    return slice === keyword;
+  if (quote || keyword) {
+    return slice === quote || slice === keyword;
   }
 
   return true;
