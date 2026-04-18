@@ -44,6 +44,45 @@ export function TextPreview({text, isPartialPreview = false, errorMessage, sourc
 
   const shouldHighlight = text.length <= LARGE_TEXT_RENDER_LIMIT;
   const sourceKeyword = sourceHighlight?.content?.trim() || '';
+  const sourceQuote = sourceHighlight?.textQuote?.trim() || '';
+  const offsetMatch = useMemo(() => {
+    const start = sourceHighlight?.textOffsetStart;
+    const end = sourceHighlight?.textOffsetEnd;
+
+    if (!shouldHighlight || typeof start !== 'number' || typeof end !== 'number') {
+      return null;
+    }
+
+    if (start < 0 || end <= start || end > text.length) {
+      return null;
+    }
+
+    return {
+      index: start,
+      text: text.slice(start, end),
+    };
+  }, [shouldHighlight, sourceHighlight?.textOffsetEnd, sourceHighlight?.textOffsetStart, text]);
+  const sourceMatch = useMemo(() => {
+    if (offsetMatch?.text) {
+      return offsetMatch;
+    }
+
+    if (shouldHighlight && sourceQuote && text.includes(sourceQuote)) {
+      return {
+        index: text.indexOf(sourceQuote),
+        text: sourceQuote,
+      };
+    }
+
+    if (shouldHighlight && sourceKeyword && text.includes(sourceKeyword)) {
+      return {
+        index: text.indexOf(sourceKeyword),
+        text: sourceKeyword,
+      };
+    }
+
+    return null;
+  }, [offsetMatch, shouldHighlight, sourceKeyword, sourceQuote, text]);
 
   useEffect(() => {
     if (!highlightRef.current) {
@@ -52,14 +91,13 @@ export function TextPreview({text, isPartialPreview = false, errorMessage, sourc
     if (typeof highlightRef.current.scrollIntoView === 'function') {
       highlightRef.current.scrollIntoView({behavior: 'smooth', block: 'start'});
     }
-  }, [sourceKeyword, text]);
+  }, [sourceMatch, text]);
 
   const renderContent = () => {
-    if (sourceKeyword && shouldHighlight && text.includes(sourceKeyword)) {
-      const index = text.indexOf(sourceKeyword);
-      const before = text.slice(0, index);
-      const match = text.slice(index, index + sourceKeyword.length);
-      const after = text.slice(index + sourceKeyword.length);
+    if (sourceMatch) {
+      const before = text.slice(0, sourceMatch.index);
+      const match = sourceMatch.text;
+      const after = text.slice(sourceMatch.index + sourceMatch.text.length);
       return (
         <>
           <span>{before}</span>
