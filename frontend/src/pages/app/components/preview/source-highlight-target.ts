@@ -74,49 +74,32 @@ export function normalizeSourceHighlightTarget(input: unknown): SourceHighlightT
   return target;
 }
 
-export function buildSourceHighlightRequestKey(target: Pick<
-  SourceHighlightTarget,
-  | 'content'
-  | 'docId'
-  | 'chunkId'
-  | 'chunkIndex'
-  | 'pageStart'
-  | 'pageEnd'
-  | 'originStart'
-  | 'originEnd'
-  | 'textQuote'
-  | 'textOffsetStart'
-  | 'textOffsetEnd'
-  | 'sheetId'
-  | 'sheetName'
-  | 'rowStart'
-  | 'rowEnd'
-  | 'columnStart'
-  | 'columnEnd'
-  | 'jsonPath'
-  | 'nodeStartOffset'
-  | 'nodeEndOffset'
->): string {
+export function buildSourceHighlightRequestKey(target: unknown): string {
+  const normalizedTarget = normalizeSourceHighlightTarget(target);
+  if (!normalizedTarget) {
+    return '';
+  }
+
   return JSON.stringify({
-    content: target.content ?? '',
-    docId: target.docId ?? '',
-    chunkId: target.chunkId ?? '',
-    chunkIndex: typeof target.chunkIndex === 'number' ? target.chunkIndex : '',
-    pageStart: target.pageStart ?? '',
-    pageEnd: target.pageEnd ?? '',
-    originStart: target.originStart ?? '',
-    originEnd: target.originEnd ?? '',
-    textQuote: target.textQuote ?? '',
-    textOffsetStart: target.textOffsetStart ?? '',
-    textOffsetEnd: target.textOffsetEnd ?? '',
-    sheetId: target.sheetId ?? '',
-    sheetName: target.sheetName ?? '',
-    rowStart: target.rowStart ?? '',
-    rowEnd: target.rowEnd ?? '',
-    columnStart: target.columnStart ?? '',
-    columnEnd: target.columnEnd ?? '',
-    jsonPath: target.jsonPath ?? '',
-    nodeStartOffset: target.nodeStartOffset ?? '',
-    nodeEndOffset: target.nodeEndOffset ?? '',
+    content: normalizedTarget.content ?? '',
+    docId: normalizedTarget.docId ?? '',
+    chunkId: normalizedTarget.chunkId ?? '',
+    chunkIndex: typeof normalizedTarget.chunkIndex === 'number' ? normalizedTarget.chunkIndex : '',
+    pageStart: normalizedTarget.pageStart ?? '',
+    pageEnd: normalizedTarget.pageEnd ?? '',
+    originStart: normalizedTarget.originStart ?? '',
+    originEnd: normalizedTarget.originEnd ?? '',
+    textQuote: normalizedTarget.textQuote ?? '',
+    textOffsetStart: normalizedTarget.textOffsetStart ?? '',
+    textOffsetEnd: normalizedTarget.textOffsetEnd ?? '',
+    sheetId: normalizedTarget.sheetId ?? '',
+    sheetName: normalizedTarget.sheetName ?? '',
+    rowStart: normalizedTarget.rowStart ?? '',
+    rowEnd: normalizedTarget.rowEnd ?? '',
+    columnStart: normalizedTarget.columnStart ?? '',
+    columnEnd: normalizedTarget.columnEnd ?? '',
+    jsonPath: normalizedTarget.jsonPath ?? '',
+    nodeStartOffset: normalizedTarget.nodeStartOffset ?? '',
+    nodeEndOffset: normalizedTarget.nodeEndOffset ?? '',
   });
 }

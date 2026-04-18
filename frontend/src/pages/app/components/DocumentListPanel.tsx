@@ -398,7 +398,7 @@ export function DocumentListPanel({
     return () => {
       cancelled = true;
     };
-  }, [documents, previewRequest, apiUrl]);
+  }, [documents, previewRequest, previewRequestDoc, apiUrl]);
 
   return (
     <div className={`flex-1 flex flex-col p-6 overflow-hidden ${isDarkTheme ? 'bg-slate-950' : 'bg-gray-50'}`}>

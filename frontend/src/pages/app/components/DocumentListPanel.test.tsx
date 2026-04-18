@@ -1,4 +1,4 @@
-import {fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {within} from '@testing-library/dom';
 import userEvent from '@testing-library/user-event';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -334,6 +334,155 @@ describe('DocumentListPanel preview integration', () => {
       expect(onPreviewRequestHandled).toHaveBeenCalledTimes(2);
     });
     expect(await screen.findByText('第二处命中')).toBeInTheDocument();
+  });
+
+  it('does not reopen preview for normalized-equivalent source requests', async () => {
+    mockFetch();
+    const onPreviewRequestHandled = vi.fn();
+    const previewRequestDoc = {
+      id: 'doc-1',
+      name: '示例文档.pdf',
+      size: 1024,
+      type: '.pdf',
+      uploadTime: '2026-03-30T00:00:00.000Z',
+      status: 'completed' as const,
+      chunkCount: 3,
+      description: '',
+    };
+    const firstRequest = {
+      docId: 'doc-1',
+      docName: '示例文档.pdf',
+      chunkId: 'chunk-1',
+      chunkIndex: 0,
+      originStart: 'a',
+      originEnd: 'b',
+      columnStart: 1,
+      columnEnd: 2,
+      content: '第一处命中',
+    };
+    const secondRequest = {
+      ...firstRequest,
+      originStart: ' a ',
+      originEnd: ' b ',
+      content: '  第一处命中  ',
+    };
+
+    const {rerender} = render(
+      <DocumentListPanel
+        isDarkTheme={false}
+        language="zh"
+        apiUrl={(endpoint) => endpoint}
+        onOpenDetail={vi.fn()}
+        locale={defaultLocale}
+        previewRequest={firstRequest}
+        previewRequestDoc={previewRequestDoc}
+        onPreviewRequestHandled={onPreviewRequestHandled}
+      />,
+    );
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(onPreviewRequestHandled).toHaveBeenCalledTimes(1);
+    });
+
+    rerender(
+      <DocumentListPanel
+        isDarkTheme={false}
+        language="zh"
+        apiUrl={(endpoint) => endpoint}
+        onOpenDetail={vi.fn()}
+        locale={defaultLocale}
+        previewRequest={secondRequest}
+        previewRequestDoc={previewRequestDoc}
+        onPreviewRequestHandled={onPreviewRequestHandled}
+      />,
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(onPreviewRequestHandled).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('第一处命中')).toBeInTheDocument();
+  });
+
+  it('opens preview when previewRequestDoc arrives after the initial request', async () => {
+    documents = [];
+    const onPreviewRequestHandled = vi.fn();
+    vi.spyOn(window, 'alert').mockImplementation(() => {});
+    vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/documents') {
+        return new Response(JSON.stringify(documents), {status: 200});
+      }
+      if (url === '/api/settings/preview-flags') {
+        return new Response(JSON.stringify({enableNewPreviewModal: true, enableNewPreviewByType: {pdf: true}}), {status: 200});
+      }
+      if (url === '/api/documents/doc-1') {
+        return new Response(JSON.stringify({error: 'missing'}), {status: 404});
+      }
+      if (url === '/api/documents/doc-1/content') {
+        return new Response(JSON.stringify({mimeType: 'application/pdf', content: {src: 'blob:https://example.com/doc-1.pdf'}}), {
+          status: 200,
+          headers: {'Content-Type': 'application/json'},
+        });
+      }
+      return new Response(JSON.stringify({status: 'ok'}), {status: 200});
+    });
+
+    const previewRequest = {
+      docId: 'doc-1',
+      docName: '示例文档.pdf',
+      chunkId: 'chunk-1',
+      chunkIndex: 0,
+      content: '第一处命中',
+    };
+    const previewRequestDoc = {
+      id: 'doc-1',
+      name: '示例文档.pdf',
+      size: 1024,
+      type: '.pdf',
+      uploadTime: '2026-03-30T00:00:00.000Z',
+      status: 'completed' as const,
+      chunkCount: 3,
+      description: '',
+    };
+
+    const {rerender} = render(
+      <DocumentListPanel
+        isDarkTheme={false}
+        language="zh"
+        apiUrl={(endpoint) => endpoint}
+        onOpenDetail={vi.fn()}
+        locale={defaultLocale}
+        previewRequest={previewRequest}
+        previewRequestDoc={null}
+        onPreviewRequestHandled={onPreviewRequestHandled}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onPreviewRequestHandled).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    rerender(
+      <DocumentListPanel
+        isDarkTheme={false}
+        language="zh"
+        apiUrl={(endpoint) => endpoint}
+        onOpenDetail={vi.fn()}
+        locale={defaultLocale}
+        previewRequest={previewRequest}
+        previewRequestDoc={previewRequestDoc}
+        onPreviewRequestHandled={onPreviewRequestHandled}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onPreviewRequestHandled).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
   });
 
   it('shows only one back-to-qa button in source preview modal', async () => {
