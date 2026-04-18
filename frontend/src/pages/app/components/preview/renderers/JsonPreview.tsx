@@ -16,21 +16,93 @@ type TextRange = {
   end: number;
 };
 
-function tryParseJson(value: unknown): {text: string; parseError: string | null} {
+function isValidRange(range: TextRange | null, textLength: number): range is TextRange {
+  return Boolean(range && range.start >= 0 && range.end > range.start && range.end <= textLength);
+}
+
+function tryParseJson(value: unknown): {parsed: unknown; text: string; parseError: string | null} {
   if (typeof value !== 'string') {
     try {
-      return {text: JSON.stringify(value, null, 2), parseError: null};
+      return {parsed: value, text: JSON.stringify(value, null, 2), parseError: null};
     } catch {
-      return {text: String(value), parseError: null};
+      return {parsed: value, text: String(value), parseError: null};
     }
   }
 
   try {
     const parsed = JSON.parse(value);
-    return {text: JSON.stringify(parsed, null, 2), parseError: null};
+    return {parsed, text: JSON.stringify(parsed, null, 2), parseError: null};
   } catch {
-    return {text: value, parseError: 'JSON 格式错误，无法解析预览内容。'};
+    return {parsed: null, text: value, parseError: 'JSON 格式错误，无法解析预览内容。'};
   }
+}
+
+function appendJsonNode(parts: string[], ranges: Map<string, TextRange>, value: unknown, path: string, indent: number): void {
+  const start = parts.join('').length;
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      parts.push('[]');
+    } else {
+      const childIndent = ' '.repeat(indent + 2);
+      const closingIndent = ' '.repeat(indent);
+      parts.push('[\n');
+      value.forEach((item, index) => {
+        if (index > 0) {
+          parts.push(',\n');
+        }
+        parts.push(childIndent);
+        appendJsonNode(parts, ranges, item, `${path}[${index}]`, indent + 2);
+      });
+      parts.push(`\n${closingIndent}]`);
+    }
+  } else if (value && typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (entries.length === 0) {
+      parts.push('{}');
+    } else {
+      const childIndent = ' '.repeat(indent + 2);
+      const closingIndent = ' '.repeat(indent);
+      parts.push('{\n');
+      entries.forEach(([key, childValue], index) => {
+        if (index > 0) {
+          parts.push(',\n');
+        }
+        parts.push(childIndent, `${JSON.stringify(key)}: `);
+        appendJsonNode(parts, ranges, childValue, `${path}.${key}`, indent + 2);
+      });
+      parts.push(`\n${closingIndent}}`);
+    }
+  } else {
+    parts.push(JSON.stringify(value));
+  }
+
+  ranges.set(path, {start, end: parts.join('').length});
+}
+
+function buildJsonPathRanges(value: unknown): Map<string, TextRange> {
+  const parts: string[] = [];
+  const ranges = new Map<string, TextRange>();
+  appendJsonNode(parts, ranges, value, '$', 0);
+  return ranges;
+}
+
+function findStructuredJsonRange(text: string, parsed: unknown, sourceHighlight: SourceHighlightTarget | null): TextRange | null {
+  const offsetStart = sourceHighlight?.nodeStartOffset;
+  const offsetEnd = sourceHighlight?.nodeEndOffset;
+  if (typeof offsetStart === 'number' && typeof offsetEnd === 'number') {
+    const offsetRange = {start: offsetStart, end: offsetEnd};
+    if (isValidRange(offsetRange, text.length)) {
+      return offsetRange;
+    }
+  }
+
+  const jsonPath = sourceHighlight?.jsonPath?.trim();
+  if (jsonPath && parsed !== null) {
+    return buildJsonPathRanges(parsed).get(jsonPath) ?? null;
+  }
+
+  return null;
 }
 
 function findWhitespaceInsensitiveRange(text: string, snippet: string): TextRange | null {
@@ -63,12 +135,31 @@ function findWhitespaceInsensitiveRange(text: string, snippet: string): TextRang
 }
 
 export function JsonPreview({value, isPartialPreview = false, errorMessage, sourceHighlight = null, onSourceBlockClick, onSourceBlockAuxClick}: JsonPreviewProps) {
-  const {text, parseError} = useMemo(() => tryParseJson(value), [value]);
+  const {parsed, text, parseError} = useMemo(() => tryParseJson(value), [value]);
   const preRef = useRef<HTMLPreElement | null>(null);
 
   const finalErrorMessage = errorMessage ?? parseError;
   const sourceKeyword = sourceHighlight?.content?.trim() || '';
-  const sourceRange = useMemo(() => findWhitespaceInsensitiveRange(text, sourceKeyword), [text, sourceKeyword]);
+  const sourceQuote = sourceHighlight?.textQuote?.trim() || '';
+  const sourceRange = useMemo(() => {
+    const structuredRange = findStructuredJsonRange(text, parsed, sourceHighlight);
+    if (structuredRange) {
+      return structuredRange;
+    }
+
+    if (sourceQuote) {
+      const quoteRange = findWhitespaceInsensitiveRange(text, sourceQuote);
+      if (quoteRange) {
+        return quoteRange;
+      }
+    }
+
+    if (sourceKeyword) {
+      return findWhitespaceInsensitiveRange(text, sourceKeyword);
+    }
+
+    return null;
+  }, [parsed, sourceHighlight, sourceKeyword, sourceQuote, text]);
 
   useEffect(() => {
     if (!preRef.current || !sourceRange) {

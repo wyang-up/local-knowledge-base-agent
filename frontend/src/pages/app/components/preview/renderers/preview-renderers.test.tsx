@@ -456,6 +456,67 @@ describe('json preview renderer', () => {
     fireEvent.click(screen.getByTestId('json-preview-source-highlight-back-to-qa'));
     expect(onBackToQa).toHaveBeenCalledTimes(1);
   });
+
+  it('prefers node offsets over fuzzy source matching when the same json snippet appears multiple times', () => {
+    const value = {
+      users: [
+        {profile: {name: 'Alice'}},
+        {profile: {name: 'Alice'}},
+      ],
+    };
+    const text = JSON.stringify(value, null, 2);
+    const firstMatchStart = text.indexOf('"profile": {');
+    const secondMatchStart = text.indexOf('"profile": {', firstMatchStart + 1);
+    const secondMatchEnd = text.indexOf('}', secondMatchStart) + 1;
+
+    render(
+      <JsonPreview
+        value={value}
+        sourceHighlight={{
+          content: 'Alice',
+          nodeStartOffset: secondMatchStart,
+          nodeEndOffset: secondMatchEnd,
+        }}
+      />,
+    );
+
+    const content = screen.getByTestId('json-preview-content');
+    const beforeHighlight = content.firstChild?.textContent ?? '';
+    const afterHighlight = content.lastChild?.textContent ?? '';
+    const highlight = screen.getByTestId('json-preview-source-highlight');
+
+    expect(beforeHighlight).toContain('},\n    {\n      ');
+    expect(highlight).toHaveTextContent('"profile": {');
+    expect(afterHighlight).toContain('\n    }\n  ]');
+  });
+
+  it('falls back to generic jsonPath targeting when node offsets are unavailable', () => {
+    const value = {
+      users: [
+        {id: 1, profile: {name: 'Alice'}},
+        {id: 2, profile: {name: 'Alice'}},
+      ],
+    };
+
+    render(
+      <JsonPreview
+        value={value}
+        sourceHighlight={{
+          content: 'Alice',
+          jsonPath: '$.users[1].profile',
+        }}
+      />,
+    );
+
+    const content = screen.getByTestId('json-preview-content');
+    const beforeHighlight = content.firstChild?.textContent ?? '';
+    const highlight = screen.getByTestId('json-preview-source-highlight');
+
+    expect(beforeHighlight).toContain('"id": 2');
+    expect(beforeHighlight).toContain('"profile": ');
+    expect(highlight).toHaveTextContent('{');
+    expect(highlight).toHaveTextContent('"name": "Alice"');
+  });
 });
 
 describe('text preview renderer', () => {
