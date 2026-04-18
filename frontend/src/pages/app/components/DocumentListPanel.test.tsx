@@ -269,7 +269,7 @@ describe('DocumentListPanel preview integration', () => {
     expect(await screen.findByTestId('pdf-preview-renderer')).toBeInTheDocument();
   });
 
-  it('reopens preview when the same chunk is targeted with different origin or column fields', async () => {
+  it('reopens preview when the same chunk is targeted with different content', async () => {
     mockFetch();
     const onPreviewRequestHandled = vi.fn();
     const previewRequestDoc = {
@@ -295,10 +295,6 @@ describe('DocumentListPanel preview integration', () => {
     };
     const secondRequest = {
       ...firstRequest,
-      originStart: 'c',
-      originEnd: 'd',
-      columnStart: 3,
-      columnEnd: 5,
       content: '第二处命中',
     };
 

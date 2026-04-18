@@ -76,6 +76,7 @@ export function normalizeSourceHighlightTarget(input: unknown): SourceHighlightT
 
 export function buildSourceHighlightRequestKey(target: Pick<
   SourceHighlightTarget,
+  | 'content'
   | 'docId'
   | 'chunkId'
   | 'chunkIndex'
@@ -97,6 +98,7 @@ export function buildSourceHighlightRequestKey(target: Pick<
   | 'nodeEndOffset'
 >): string {
   return JSON.stringify({
+    content: target.content ?? '',
     docId: target.docId ?? '',
     chunkId: target.chunkId ?? '',
     chunkIndex: typeof target.chunkIndex === 'number' ? target.chunkIndex : '',
