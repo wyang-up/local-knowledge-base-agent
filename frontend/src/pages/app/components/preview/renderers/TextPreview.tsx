@@ -27,6 +27,18 @@ function countMatches(text: string, keyword: string): number {
   return matches ? matches.length : 0;
 }
 
+function isCompatibleOffsetSlice(slice: string, quote: string, keyword: string): boolean {
+  if (quote) {
+    return slice === quote;
+  }
+
+  if (keyword) {
+    return slice === keyword;
+  }
+
+  return true;
+}
+
 export function TextPreview({text, isPartialPreview = false, errorMessage, sourceHighlight = null, onSourceBlockClick, onSourceBlockAuxClick}: TextPreviewProps) {
   const [keyword, setKeyword] = useState('');
   const highlightRef = useRef<HTMLElement | null>(null);
@@ -57,11 +69,16 @@ export function TextPreview({text, isPartialPreview = false, errorMessage, sourc
       return null;
     }
 
+    const slice = text.slice(start, end);
+    if (!isCompatibleOffsetSlice(slice, sourceQuote, sourceKeyword)) {
+      return null;
+    }
+
     return {
       index: start,
-      text: text.slice(start, end),
+      text: slice,
     };
-  }, [shouldHighlight, sourceHighlight?.textOffsetEnd, sourceHighlight?.textOffsetStart, text]);
+  }, [shouldHighlight, sourceHighlight?.textOffsetEnd, sourceHighlight?.textOffsetStart, sourceKeyword, sourceQuote, text]);
   const sourceMatch = useMemo(() => {
     if (offsetMatch?.text) {
       return offsetMatch;

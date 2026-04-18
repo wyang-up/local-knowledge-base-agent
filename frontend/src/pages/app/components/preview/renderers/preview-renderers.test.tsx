@@ -559,8 +559,33 @@ describe('text preview renderer', () => {
 
     const content = screen.getByTestId('text-preview-content');
     const beforeHighlight = content.firstChild?.textContent ?? '';
+    const afterHighlight = content.lastChild?.textContent ?? '';
 
     expect(beforeHighlight).toContain('中间内容');
+    expect(afterHighlight).toContain('目标尾部');
+  });
+
+  it('falls back to text quote matching when offsets drift away from the provided snippet', () => {
+    const text = '第一处命中\n上下文A\n重复片段\n中间内容\n重复片段\n目标尾部';
+    const firstMatchStart = text.indexOf('重复片段');
+    const secondMatchStart = text.indexOf('重复片段', firstMatchStart + 1);
+
+    render(
+      <TextPreview
+        text={text}
+        sourceHighlight={{
+          content: '重复片段',
+          textQuote: '重复片段',
+          textOffsetStart: secondMatchStart - 1,
+          textOffsetEnd: secondMatchStart - 1 + '重复片段'.length,
+        }}
+      />,
+    );
+
+    const content = screen.getByTestId('text-preview-content');
+    const beforeHighlight = content.firstChild?.textContent ?? '';
+
+    expect(beforeHighlight).not.toContain('中间内容');
   });
 
   it('supports back-to-qa action from table source highlight block', () => {
