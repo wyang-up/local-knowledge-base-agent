@@ -73,3 +73,48 @@ export function normalizeSourceHighlightTarget(input: unknown): SourceHighlightT
 
   return target;
 }
+
+export function buildSourceHighlightRequestKey(target: Pick<
+  SourceHighlightTarget,
+  | 'docId'
+  | 'chunkId'
+  | 'chunkIndex'
+  | 'pageStart'
+  | 'pageEnd'
+  | 'originStart'
+  | 'originEnd'
+  | 'textQuote'
+  | 'textOffsetStart'
+  | 'textOffsetEnd'
+  | 'sheetId'
+  | 'sheetName'
+  | 'rowStart'
+  | 'rowEnd'
+  | 'columnStart'
+  | 'columnEnd'
+  | 'jsonPath'
+  | 'nodeStartOffset'
+  | 'nodeEndOffset'
+>): string {
+  return JSON.stringify({
+    docId: target.docId ?? '',
+    chunkId: target.chunkId ?? '',
+    chunkIndex: typeof target.chunkIndex === 'number' ? target.chunkIndex : '',
+    pageStart: target.pageStart ?? '',
+    pageEnd: target.pageEnd ?? '',
+    originStart: target.originStart ?? '',
+    originEnd: target.originEnd ?? '',
+    textQuote: target.textQuote ?? '',
+    textOffsetStart: target.textOffsetStart ?? '',
+    textOffsetEnd: target.textOffsetEnd ?? '',
+    sheetId: target.sheetId ?? '',
+    sheetName: target.sheetName ?? '',
+    rowStart: target.rowStart ?? '',
+    rowEnd: target.rowEnd ?? '',
+    columnStart: target.columnStart ?? '',
+    columnEnd: target.columnEnd ?? '',
+    jsonPath: target.jsonPath ?? '',
+    nodeStartOffset: target.nodeStartOffset ?? '',
+    nodeEndOffset: target.nodeEndOffset ?? '',
+  });
+}

@@ -6,7 +6,7 @@ import type {Chunk, Document, MessageSource} from '../../../shared/types';
 import {DocumentPreviewContent} from './preview/DocumentPreviewContent';
 import {LegacyChunkPreviewModal} from './preview/LegacyChunkPreviewModal';
 import {PreviewModal} from './preview/PreviewModal';
-import {normalizeSourceHighlightTarget} from './preview/source-highlight-target';
+import {buildSourceHighlightRequestKey, normalizeSourceHighlightTarget} from './preview/source-highlight-target';
 import {useDocumentPreviewResource} from './preview/useDocumentPreviewResource';
 
 export type DocumentListLocale = {
@@ -343,7 +343,7 @@ export function DocumentListPanel({
       return;
     }
 
-    const requestKey = `${previewRequest.docId}:${previewRequest.chunkId ?? ''}:${previewRequest.chunkIndex ?? ''}`;
+    const requestKey = buildSourceHighlightRequestKey(previewRequest);
     if (requestKey === handledPreviewRequestRef.current) {
       return;
     }

@@ -269,6 +269,77 @@ describe('DocumentListPanel preview integration', () => {
     expect(await screen.findByTestId('pdf-preview-renderer')).toBeInTheDocument();
   });
 
+  it('reopens preview when the same chunk is targeted with different origin or column fields', async () => {
+    mockFetch();
+    const onPreviewRequestHandled = vi.fn();
+    const previewRequestDoc = {
+      id: 'doc-1',
+      name: '示例文档.pdf',
+      size: 1024,
+      type: '.pdf',
+      uploadTime: '2026-03-30T00:00:00.000Z',
+      status: 'completed' as const,
+      chunkCount: 3,
+      description: '',
+    };
+    const firstRequest = {
+      docId: 'doc-1',
+      docName: '示例文档.pdf',
+      chunkId: 'chunk-1',
+      chunkIndex: 0,
+      originStart: 'a',
+      originEnd: 'b',
+      columnStart: 1,
+      columnEnd: 2,
+      content: '第一处命中',
+    };
+    const secondRequest = {
+      ...firstRequest,
+      originStart: 'c',
+      originEnd: 'd',
+      columnStart: 3,
+      columnEnd: 5,
+      content: '第二处命中',
+    };
+
+    const {rerender} = render(
+      <DocumentListPanel
+        isDarkTheme={false}
+        language="zh"
+        apiUrl={(endpoint) => endpoint}
+        onOpenDetail={vi.fn()}
+        locale={defaultLocale}
+        previewRequest={firstRequest}
+        previewRequestDoc={previewRequestDoc}
+        onPreviewRequestHandled={onPreviewRequestHandled}
+      />,
+    );
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(await screen.findByText('第一处命中')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(onPreviewRequestHandled).toHaveBeenCalledTimes(1);
+    });
+
+    rerender(
+      <DocumentListPanel
+        isDarkTheme={false}
+        language="zh"
+        apiUrl={(endpoint) => endpoint}
+        onOpenDetail={vi.fn()}
+        locale={defaultLocale}
+        previewRequest={secondRequest}
+        previewRequestDoc={previewRequestDoc}
+        onPreviewRequestHandled={onPreviewRequestHandled}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onPreviewRequestHandled).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText('第二处命中')).toBeInTheDocument();
+  });
+
   it('shows only one back-to-qa button in source preview modal', async () => {
     mockFetch();
 
