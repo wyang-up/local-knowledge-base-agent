@@ -517,6 +517,41 @@ describe('json preview renderer', () => {
     expect(highlight).toHaveTextContent('{');
     expect(highlight).toHaveTextContent('"name": "Alice"');
   });
+
+  it('supports jsonPath root targeting for valid null json documents', () => {
+    render(
+      <JsonPreview
+        value="null"
+        sourceHighlight={{jsonPath: '$'}}
+      />,
+    );
+
+    expect(screen.getByTestId('json-preview-source-highlight')).toHaveTextContent('null');
+  });
+
+  it('supports escaped bracket jsonPath for object keys that need quoting', () => {
+    const value = {
+      'profile.name[0] "primary"': {
+        city: 'Beijing',
+      },
+      fallback: {
+        city: 'Shanghai',
+      },
+    };
+
+    render(
+      <JsonPreview
+        value={value}
+        sourceHighlight={{jsonPath: '$["profile.name[0] \\\"primary\\\""]'}}
+      />,
+    );
+
+    const content = screen.getByTestId('json-preview-content');
+    const beforeHighlight = content.firstChild?.textContent ?? '';
+
+    expect(beforeHighlight).toContain('"profile.name[0] \\\"primary\\\"": ');
+    expect(screen.getByTestId('json-preview-source-highlight')).toHaveTextContent('"city": "Beijing"');
+  });
 });
 
 describe('text preview renderer', () => {

@@ -20,21 +20,29 @@ function isValidRange(range: TextRange | null, textLength: number): range is Tex
   return Boolean(range && range.start >= 0 && range.end > range.start && range.end <= textLength);
 }
 
-function tryParseJson(value: unknown): {parsed: unknown; text: string; parseError: string | null} {
+function tryParseJson(value: unknown): {parsed: unknown; text: string; parseError: string | null; didParse: boolean} {
   if (typeof value !== 'string') {
     try {
-      return {parsed: value, text: JSON.stringify(value, null, 2), parseError: null};
+      return {parsed: value, text: JSON.stringify(value, null, 2), parseError: null, didParse: true};
     } catch {
-      return {parsed: value, text: String(value), parseError: null};
+      return {parsed: value, text: String(value), parseError: null, didParse: false};
     }
   }
 
   try {
     const parsed = JSON.parse(value);
-    return {parsed, text: JSON.stringify(parsed, null, 2), parseError: null};
+    return {parsed, text: JSON.stringify(parsed, null, 2), parseError: null, didParse: true};
   } catch {
-    return {parsed: null, text: value, parseError: 'JSON 格式错误，无法解析预览内容。'};
+    return {parsed: null, text: value, parseError: 'JSON 格式错误，无法解析预览内容。', didParse: false};
   }
+}
+
+function toJsonPathSegment(key: string): string {
+  if (/^[A-Za-z_$][\w$]*$/.test(key)) {
+    return `.${key}`;
+  }
+
+  return `[${JSON.stringify(key)}]`;
 }
 
 function appendJsonNode(parts: string[], ranges: Map<string, TextRange>, value: unknown, path: string, indent: number): void {
@@ -69,7 +77,7 @@ function appendJsonNode(parts: string[], ranges: Map<string, TextRange>, value: 
           parts.push(',\n');
         }
         parts.push(childIndent, `${JSON.stringify(key)}: `);
-        appendJsonNode(parts, ranges, childValue, `${path}.${key}`, indent + 2);
+        appendJsonNode(parts, ranges, childValue, `${path}${toJsonPathSegment(key)}`, indent + 2);
       });
       parts.push(`\n${closingIndent}}`);
     }
@@ -87,7 +95,7 @@ function buildJsonPathRanges(value: unknown): Map<string, TextRange> {
   return ranges;
 }
 
-function findStructuredJsonRange(text: string, parsed: unknown, sourceHighlight: SourceHighlightTarget | null): TextRange | null {
+function findStructuredJsonRange(text: string, parsed: unknown, didParse: boolean, sourceHighlight: SourceHighlightTarget | null): TextRange | null {
   const offsetStart = sourceHighlight?.nodeStartOffset;
   const offsetEnd = sourceHighlight?.nodeEndOffset;
   if (typeof offsetStart === 'number' && typeof offsetEnd === 'number') {
@@ -98,7 +106,7 @@ function findStructuredJsonRange(text: string, parsed: unknown, sourceHighlight:
   }
 
   const jsonPath = sourceHighlight?.jsonPath?.trim();
-  if (jsonPath && parsed !== null) {
+  if (jsonPath && didParse) {
     return buildJsonPathRanges(parsed).get(jsonPath) ?? null;
   }
 
@@ -135,14 +143,14 @@ function findWhitespaceInsensitiveRange(text: string, snippet: string): TextRang
 }
 
 export function JsonPreview({value, isPartialPreview = false, errorMessage, sourceHighlight = null, onSourceBlockClick, onSourceBlockAuxClick}: JsonPreviewProps) {
-  const {parsed, text, parseError} = useMemo(() => tryParseJson(value), [value]);
+  const {parsed, text, parseError, didParse} = useMemo(() => tryParseJson(value), [value]);
   const preRef = useRef<HTMLPreElement | null>(null);
 
   const finalErrorMessage = errorMessage ?? parseError;
   const sourceKeyword = sourceHighlight?.content?.trim() || '';
   const sourceQuote = sourceHighlight?.textQuote?.trim() || '';
   const sourceRange = useMemo(() => {
-    const structuredRange = findStructuredJsonRange(text, parsed, sourceHighlight);
+    const structuredRange = findStructuredJsonRange(text, parsed, didParse, sourceHighlight);
     if (structuredRange) {
       return structuredRange;
     }
@@ -159,7 +167,7 @@ export function JsonPreview({value, isPartialPreview = false, errorMessage, sour
     }
 
     return null;
-  }, [parsed, sourceHighlight, sourceKeyword, sourceQuote, text]);
+  }, [didParse, parsed, sourceHighlight, sourceKeyword, sourceQuote, text]);
 
   useEffect(() => {
     if (!preRef.current || !sourceRange) {
