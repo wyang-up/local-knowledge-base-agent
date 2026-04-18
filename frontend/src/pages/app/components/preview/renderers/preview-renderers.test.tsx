@@ -90,7 +90,7 @@ describe('pdf preview renderer', () => {
     expect(screen.getByText('PDF 加载失败')).toBeInTheDocument();
   });
 
-  it('renders original-style pdf page surface with overlay highlight', async () => {
+  it('falls back honestly to page navigation when a PDF quote is present', async () => {
     render(
       <PdfPreview
         src="/api/documents/doc-1/content"
@@ -109,8 +109,10 @@ describe('pdf preview renderer', () => {
       const iframe = iframes[iframes.length - 1];
       const src = iframe.getAttribute('src') ?? '';
       expect(src).toContain('page=2');
-      expect(src).toContain('search=');
+      expect(src).not.toContain('search=');
     });
+
+    expect(screen.getByText('当前仅支持定位到 PDF 页码，暂不展示不可信的精确高亮。')).toBeInTheDocument();
   });
 
   it('renders page-level fallback highlight when page is known but quote is not found', async () => {
@@ -128,6 +130,8 @@ describe('pdf preview renderer', () => {
     const iframes = await screen.findAllByTitle('PDF 预览内容') as HTMLIFrameElement[];
     const iframe = iframes[iframes.length - 1];
     expect(iframe.getAttribute('src')).toContain('page=2');
+    expect(iframe.getAttribute('src')).not.toContain('search=');
+    expect(screen.getByText('当前仅支持定位到 PDF 页码，暂不展示不可信的精确高亮。')).toBeInTheDocument();
   });
 });
 

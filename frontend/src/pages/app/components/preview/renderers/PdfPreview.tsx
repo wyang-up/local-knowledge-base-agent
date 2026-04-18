@@ -1,5 +1,6 @@
 import {useMemo} from 'react';
 import type {SourceHighlightTarget} from '../source-highlight-target';
+import {buildPdfHighlightTarget} from './pdf-highlight-target';
 
 type SourceHighlight = SourceHighlightTarget | null;
 
@@ -19,37 +20,20 @@ function sanitizePdfSource(src: string): string {
   return src.slice(0, hashIndex);
 }
 
-function buildSearchKeyword(sourceHighlight: SourceHighlight): string {
-  const preferred = sourceHighlight?.textQuote?.trim() || sourceHighlight?.content?.trim() || '';
-  if (!preferred) {
-    return '';
-  }
-
-  return preferred
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 120);
-}
-
 function buildPdfViewerUrl(src: string, sourceHighlight: SourceHighlight): string {
   const base = sanitizePdfSource(src);
-  const page = typeof sourceHighlight?.pageStart === 'number' && sourceHighlight.pageStart > 0
-    ? sourceHighlight.pageStart
-    : 1;
-  const search = buildSearchKeyword(sourceHighlight);
+  const target = buildPdfHighlightTarget(sourceHighlight);
 
   const hashParams: string[] = ['toolbar=0', 'navpanes=0', 'statusbar=0', 'messages=0'];
-  hashParams.push(`page=${page}`);
+  hashParams.push(`page=${target.page}`);
   hashParams.push('zoom=page-width');
-  if (search) {
-    hashParams.push(`search=${encodeURIComponent(search)}`);
-  }
 
   return `${base}#${hashParams.join('&')}`;
 }
 
 export function PdfPreview({src, isPartialPreview = false, errorMessage, sourceHighlight = null}: PdfPreviewProps) {
   const viewerUrl = useMemo(() => buildPdfViewerUrl(src, sourceHighlight), [src, sourceHighlight]);
+  const highlightTarget = useMemo(() => sourceHighlight ? buildPdfHighlightTarget(sourceHighlight) : null, [sourceHighlight]);
 
   return (
     <section data-testid="pdf-preview-renderer" className="h-full min-h-0 flex flex-col">
@@ -60,6 +44,7 @@ export function PdfPreview({src, isPartialPreview = false, errorMessage, sourceH
         </div>
       ) : null}
       {isPartialPreview ? <p className="shrink-0 text-xs text-gray-600">当前仅展示部分预览内容。</p> : null}
+      {highlightTarget ? <p className="mt-2 shrink-0 text-xs text-amber-700">{highlightTarget.notice}</p> : null}
       <iframe
         title="PDF 预览内容"
         src={viewerUrl}
