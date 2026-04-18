@@ -468,12 +468,14 @@ describe('json preview renderer', () => {
     const firstMatchStart = text.indexOf('"profile": {');
     const secondMatchStart = text.indexOf('"profile": {', firstMatchStart + 1);
     const secondMatchEnd = text.indexOf('}', secondMatchStart) + 1;
+    const secondProfileSlice = text.slice(secondMatchStart, secondMatchEnd);
 
     render(
       <JsonPreview
         value={value}
         sourceHighlight={{
           content: 'Alice',
+          textQuote: secondProfileSlice,
           nodeStartOffset: secondMatchStart,
           nodeEndOffset: secondMatchEnd,
         }}
@@ -551,6 +553,38 @@ describe('json preview renderer', () => {
 
     expect(beforeHighlight).toContain('"profile.name[0] \\\"primary\\\"": ');
     expect(screen.getByTestId('json-preview-source-highlight')).toHaveTextContent('"city": "Beijing"');
+  });
+
+  it('rejects drifted but in-bounds node offsets and falls back to jsonPath targeting', () => {
+    const value = {
+      users: [
+        {id: 1, profile: {name: 'Alice'}},
+        {id: 2, profile: {name: 'Alice'}},
+      ],
+    };
+    const text = JSON.stringify(value, null, 2);
+    const firstProfileStart = text.indexOf('"profile": {');
+    const firstProfileEnd = text.indexOf('}', firstProfileStart) + 1;
+
+    render(
+      <JsonPreview
+        value={value}
+        sourceHighlight={{
+          content: 'Alice',
+          nodeStartOffset: firstProfileStart - 2,
+          nodeEndOffset: firstProfileEnd - 2,
+          jsonPath: '$.users[1].profile',
+        }}
+      />,
+    );
+
+    const content = screen.getByTestId('json-preview-content');
+    const beforeHighlight = content.firstChild?.textContent ?? '';
+    const highlight = screen.getByTestId('json-preview-source-highlight');
+
+    expect(beforeHighlight).toContain('"id": 2');
+    expect(highlight).toHaveTextContent('"name": "Alice"');
+    expect(highlight).not.toHaveTextContent('id');
   });
 });
 

@@ -20,6 +20,14 @@ function isValidRange(range: TextRange | null, textLength: number): range is Tex
   return Boolean(range && range.start >= 0 && range.end > range.start && range.end <= textLength);
 }
 
+function isCompatibleOffsetSlice(slice: string, quote: string, keyword: string): boolean {
+  if (quote || keyword) {
+    return slice === quote || slice === keyword;
+  }
+
+  return true;
+}
+
 function tryParseJson(value: unknown): {parsed: unknown; text: string; parseError: string | null; didParse: boolean} {
   if (typeof value !== 'string') {
     try {
@@ -98,10 +106,15 @@ function buildJsonPathRanges(value: unknown): Map<string, TextRange> {
 function findStructuredJsonRange(text: string, parsed: unknown, didParse: boolean, sourceHighlight: SourceHighlightTarget | null): TextRange | null {
   const offsetStart = sourceHighlight?.nodeStartOffset;
   const offsetEnd = sourceHighlight?.nodeEndOffset;
+  const keyword = sourceHighlight?.content?.trim() || '';
+  const quote = sourceHighlight?.textQuote?.trim() || '';
   if (typeof offsetStart === 'number' && typeof offsetEnd === 'number') {
     const offsetRange = {start: offsetStart, end: offsetEnd};
     if (isValidRange(offsetRange, text.length)) {
-      return offsetRange;
+      const slice = text.slice(offsetStart, offsetEnd);
+      if (isCompatibleOffsetSlice(slice, quote, keyword)) {
+        return offsetRange;
+      }
     }
   }
 
