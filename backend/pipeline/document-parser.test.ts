@@ -3,9 +3,10 @@
 import os from 'os';
 import path from 'path';
 import { promises as fs } from 'fs';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as xlsx from 'xlsx';
 import { parseDocument, resolveXlsxApi } from './document-parser.ts';
+import { PDFParse } from 'pdf-parse';
 
 const tempDirs: string[] = [];
 
@@ -17,6 +18,10 @@ async function makeTempDir() {
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
+});
+
+beforeEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe('document-parser', () => {
@@ -81,5 +86,41 @@ describe('document-parser', () => {
 
     expect(parsed.units).toHaveLength(2);
     expect(parsed.units.map((unit) => unit.sourceLabel)).toEqual(['profile', 'settings']);
+  });
+
+  it('keeps per-page units and page numbers for pdf parsing', async () => {
+    const dir = await makeTempDir();
+    const filePath = path.join(dir, 'sample.pdf');
+    await fs.writeFile(filePath, Buffer.from('%PDF-test'));
+
+    const destroy = vi.fn();
+    vi.spyOn(PDFParse.prototype, 'getText').mockResolvedValue({
+      pages: [
+        { text: '封面内容' },
+        { text: '第二页重点内容' },
+      ],
+    } as any);
+    vi.spyOn(PDFParse.prototype, 'destroy').mockImplementation(destroy as any);
+
+    const parsed = await parseDocument({ filePath, fileType: 'pdf', fileName: 'sample.pdf' });
+
+    expect(parsed.units).toHaveLength(2);
+    expect(parsed.units[0]).toMatchObject({
+      sourceUnit: 'body',
+      sourceLabel: '第1页',
+      text: '封面内容',
+      pageStart: 1,
+      pageEnd: 1,
+    });
+    expect(parsed.units[1]).toMatchObject({
+      sourceUnit: 'body',
+      sourceLabel: '第2页',
+      text: '第二页重点内容',
+      pageStart: 2,
+      pageEnd: 2,
+    });
+    expect(parsed.text).toContain('封面内容');
+    expect(parsed.text).toContain('第二页重点内容');
+    expect(destroy).toHaveBeenCalled();
   });
 });

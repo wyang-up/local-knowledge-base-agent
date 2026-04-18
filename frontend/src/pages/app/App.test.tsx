@@ -2332,7 +2332,7 @@ describe('App', () => {
     expect((await screen.findAllByText('清理向量缓存失败，请稍后重试。')).length).toBeGreaterThan(0);
   });
 
-  it('opens document preview when source item clicked in qa', async () => {
+  it('opens document preview when source item clicked in qa with structured PDF target', async () => {
     const user = userEvent.setup();
     const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
 
@@ -2361,10 +2361,9 @@ describe('App', () => {
               sources: [
                 {
                   docId: 'doc-1',
-                  chunkId: 'chunk-1',
-                  chunkIndex: 0,
                   docName: '失败文档.pdf',
-                  content: '预览内容',
+                  pageStart: 2,
+                  textQuote: '目标朔源内容片段',
                 },
               ],
             },
@@ -2439,6 +2438,9 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', {name: '展开溯源'}));
     await user.click(await screen.findByRole('button', {name: '失败文档.pdf-第1分块'}));
 
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(await screen.findByTitle('PDF 预览内容')).toHaveAttribute('src', expect.stringContaining('page=2'));
+    expect(screen.getByText('当前仅支持定位到 PDF 页码，暂不展示不可信的精确高亮。')).toBeInTheDocument();
     expect(screen.queryByText('目录大纲')).not.toBeInTheDocument();
   });
 

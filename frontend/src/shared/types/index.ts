@@ -48,7 +48,7 @@ export interface MessageSource {
   chunkId?: string;
   chunkIndex?: number;
   docName: string;
-  content: string;
+  content?: string;
   originStart?: string;
   originEnd?: string;
   pageStart?: number;

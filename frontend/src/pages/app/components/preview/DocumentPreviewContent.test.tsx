@@ -1,6 +1,7 @@
 import {fireEvent, render, screen} from '@testing-library/react';
 import {describe, expect, it, vi} from 'vitest';
 import {DocumentPreviewContent, resolveDocumentPreviewType} from './DocumentPreviewContent';
+import {normalizeSourceHighlightTarget} from './source-highlight-target';
 
 describe('resolveDocumentPreviewType', () => {
   it('uses MIME first, then extension, then fallback type', () => {
@@ -60,6 +61,20 @@ describe('resolveDocumentPreviewType', () => {
       isFallback: true,
       fallbackReason: 'type-disabled',
       disabledType: 'json',
+    });
+  });
+});
+
+describe('normalizeSourceHighlightTarget', () => {
+  it('keeps structured-only targets without content', () => {
+    expect(normalizeSourceHighlightTarget({
+      docId: 'doc-1',
+      pageStart: 2,
+      textQuote: '目标朔源内容片段',
+    })).toEqual({
+      docId: 'doc-1',
+      pageStart: 2,
+      textQuote: '目标朔源内容片段',
     });
   });
 });

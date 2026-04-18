@@ -67,7 +67,30 @@ export function normalizeSourceHighlightTarget(input: unknown): SourceHighlightT
     nodeEndOffset: readNumber(raw.nodeEndOffset, {min: 0}),
   };
 
-  if (!target.docId && !target.chunkId && typeof target.chunkIndex !== 'number' && !target.content) {
+  const hasLocator = Boolean(
+    target.docId
+      || target.chunkId
+      || typeof target.chunkIndex === 'number'
+      || target.content
+      || target.originStart
+      || target.originEnd
+      || typeof target.pageStart === 'number'
+      || typeof target.pageEnd === 'number'
+      || target.textQuote
+      || typeof target.textOffsetStart === 'number'
+      || typeof target.textOffsetEnd === 'number'
+      || target.sheetId
+      || target.sheetName
+      || typeof target.rowStart === 'number'
+      || typeof target.rowEnd === 'number'
+      || typeof target.columnStart === 'number'
+      || typeof target.columnEnd === 'number'
+      || target.jsonPath
+      || typeof target.nodeStartOffset === 'number'
+      || typeof target.nodeEndOffset === 'number',
+  );
+
+  if (!hasLocator) {
     return null;
   }
 

@@ -1626,7 +1626,7 @@ export default function App() {
       onTabChange={handleTabChange}
     >
       {currentView === 'detail' && <DocumentDetail />}
-      {currentView === 'list' && activeTab === 'documents' && <DocumentList />}
+      {currentView === 'list' && activeTab === 'documents' && DocumentList()}
       {currentView === 'list' && activeTab === 'qa' && QAPage()}
       {currentView === 'list' && activeTab === 'settings' && SettingsPage()}
 

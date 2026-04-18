@@ -29,6 +29,8 @@ export type ParsedDocumentUnit = {
   text: string;
   headers?: string[];
   nodePath?: string;
+  pageStart?: number;
+  pageEnd?: number;
 };
 
 export type ParsedDocument = {
@@ -138,6 +140,25 @@ export async function parseDocument(input: ParseDocumentInput): Promise<ParsedDo
     const parser = new PDFParse({ data: await fs.readFile(input.filePath) });
     const result = await parser.getText();
     await parser.destroy();
+    const pages = (result.pages ?? [])
+      .map((page, index) => ({
+        sourceUnit: 'body' as const,
+        sourceLabel: `第${index + 1}页`,
+        text: page.text?.trim() ?? '',
+        pageStart: index + 1,
+        pageEnd: index + 1,
+      }))
+      .filter((unit) => unit.text.length > 0);
+
+    if (pages.length > 0) {
+      return {
+        fileType,
+        fileName: input.fileName,
+        text: pages.map((page) => page.text).join('\n'),
+        units: pages,
+      };
+    }
+
     return createBodyParsed(fileType, input.fileName, extractPdfText(result));
   }
 

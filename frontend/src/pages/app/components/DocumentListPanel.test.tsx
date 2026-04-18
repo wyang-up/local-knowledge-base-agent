@@ -269,6 +269,31 @@ describe('DocumentListPanel preview integration', () => {
     expect(await screen.findByTestId('pdf-preview-renderer')).toBeInTheDocument();
   });
 
+  it('preserves structured preview targets without content when opening from previewRequest', async () => {
+    mockFetch();
+
+    render(
+      <DocumentListPanel
+        isDarkTheme={false}
+        language="zh"
+        apiUrl={(endpoint) => endpoint}
+        onOpenDetail={vi.fn()}
+        locale={defaultLocale}
+        previewRequest={{
+          docId: 'doc-1',
+          docName: '示例文档.pdf',
+          pageStart: 2,
+          textQuote: '目标朔源内容片段',
+        }}
+      />,
+    );
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    const iframe = await screen.findByTitle('PDF 预览内容');
+    expect(iframe).toHaveAttribute('src', expect.stringContaining('page=2'));
+    expect(screen.getByText('当前仅支持定位到 PDF 页码，暂不展示不可信的精确高亮。')).toBeInTheDocument();
+  });
+
   it('reopens preview when the same chunk is targeted with different content', async () => {
     mockFetch();
     const onPreviewRequestHandled = vi.fn();
