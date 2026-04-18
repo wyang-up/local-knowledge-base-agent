@@ -176,4 +176,29 @@ describe('server source metadata helpers', () => {
       nodeEndOffset: 98,
     });
   });
+
+  it('falls back to plain mapped sources when metadata lookup fails', async () => {
+    const chunk = {
+      id: 'chunk-1',
+      docId: 'doc-1',
+      chunkIndex: 2,
+      fileName: 'sample.json',
+      content: '命中内容全文',
+      pageStart: 3,
+      pageEnd: 4,
+      originStart: 'p3:start',
+      originEnd: 'p4:end',
+    };
+
+    const sources = await buildSourcesForRetrievedChunks(
+      [chunk],
+      {
+        listChunkMetadata: vi.fn(async () => {
+          throw new Error('metadata unavailable');
+        }),
+      },
+    );
+
+    expect(sources).toEqual(mapSources([chunk]));
+  });
 });

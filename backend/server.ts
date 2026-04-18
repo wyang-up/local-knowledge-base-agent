@@ -365,21 +365,25 @@ export async function buildSourcesForRetrievedChunks(
   chunks: any[],
   pipelineStore: { listChunkMetadata(documentId: string): Promise<any[]> },
 ) {
-  const docIds = Array.from(
-    new Set(
-      chunks
-        .map((chunk: any) => (typeof chunk?.docId === 'string' ? chunk.docId : ''))
-        .filter(Boolean),
-    ),
-  );
+  try {
+    const docIds = Array.from(
+      new Set(
+        chunks
+          .map((chunk: any) => (typeof chunk?.docId === 'string' ? chunk.docId : ''))
+          .filter(Boolean),
+      ),
+    );
 
-  const metadataRecords: any[] = [];
+    const metadataRecords: any[] = [];
 
-  for (const docId of docIds) {
-    metadataRecords.push(...await pipelineStore.listChunkMetadata(docId));
+    for (const docId of docIds) {
+      metadataRecords.push(...await pipelineStore.listChunkMetadata(docId));
+    }
+
+    return mapSources(enrichRetrievedChunksWithMetadata(chunks, metadataRecords));
+  } catch {
+    return mapSources(chunks);
   }
-
-  return mapSources(enrichRetrievedChunksWithMetadata(chunks, metadataRecords));
 }
 
 async function retrieveTopChunks(message: string, config: RuntimeConfig) {
