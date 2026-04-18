@@ -361,6 +361,27 @@ export function enrichRetrievedChunksWithMetadata(chunks: any[], metadataRecords
   });
 }
 
+export async function buildSourcesForRetrievedChunks(
+  chunks: any[],
+  pipelineStore: { listChunkMetadata(documentId: string): Promise<any[]> },
+) {
+  const docIds = Array.from(
+    new Set(
+      chunks
+        .map((chunk: any) => (typeof chunk?.docId === 'string' ? chunk.docId : ''))
+        .filter(Boolean),
+    ),
+  );
+
+  const metadataRecords: any[] = [];
+
+  for (const docId of docIds) {
+    metadataRecords.push(...await pipelineStore.listChunkMetadata(docId));
+  }
+
+  return mapSources(enrichRetrievedChunksWithMetadata(chunks, metadataRecords));
+}
+
 async function retrieveTopChunks(message: string, config: RuntimeConfig) {
   let topChunks: any[] = [];
   if (!chunkTable) {
@@ -1164,7 +1185,7 @@ async function startServer() {
         },
       );
 
-      const sources = mapSources(topChunks);
+      const sources = await buildSourcesForRetrievedChunks(topChunks, pipelineStore);
 
       const content = response.data?.choices?.[0]?.message?.content;
       if (typeof content !== 'string' || !content.trim()) {
@@ -1205,7 +1226,7 @@ async function startServer() {
     const topChunks = await retrieveTopChunks(message, config);
     const context = topChunks.map((chunk: any) => chunk.content).join('\n\n');
     const systemPrompt = buildSystemPrompt(context);
-    const sources = mapSources(topChunks);
+    const sources = await buildSourcesForRetrievedChunks(topChunks, pipelineStore);
 
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
