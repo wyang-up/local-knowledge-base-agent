@@ -1,5 +1,5 @@
-import {fireEvent, render, screen, waitFor} from '@testing-library/react';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {fireEvent, render, screen, waitFor, within} from '@testing-library/react';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {JsonPreview} from './JsonPreview';
 import {PdfPreview} from './PdfPreview';
 import {TablePreview} from './TablePreview';
@@ -440,14 +440,14 @@ describe('json preview renderer', () => {
   });
 
   it('highlights source snippet inside json preview', () => {
-    render(<JsonPreview value={'{"name":"Alice","city":"Beijing"}'} sourceHighlight={{content: '  "city": "Beijing"'}} />);
+    const view = render(<JsonPreview value={'{"name":"Alice","city":"Beijing"}'} sourceHighlight={{content: '  "city": "Beijing"'}} />);
 
-    expect(screen.getByTestId('preview-highlight-block')).toHaveTextContent('"city": "Beijing"');
+    expect(within(view.container).getByTestId('preview-highlight-block')).toHaveTextContent('"city": "Beijing"');
   });
 
   it('renders json source as original-text block highlight', () => {
     const onBackToQa = vi.fn();
-    render(
+    const view = render(
       <JsonPreview
         value={'{"profile": {\n  "name": "Alice"\n},"tags":["admin"]}'}
         sourceHighlight={{content: '"profile": {\n  "name": "Alice"\n}'}}
@@ -455,9 +455,11 @@ describe('json preview renderer', () => {
       />,
     );
 
-    expect(screen.getByTestId('preview-highlight-block')).toBeInTheDocument();
-    expect(screen.getByTestId('json-preview-content')).toHaveTextContent('"profile"');
-    fireEvent.click(screen.getByTestId('json-preview-source-highlight-back-to-qa'));
+    const preview = within(view.container);
+
+    expect(preview.getByTestId('preview-highlight-block')).toBeInTheDocument();
+    expect(preview.getByTestId('json-preview-content')).toHaveTextContent('"profile"');
+    fireEvent.click(preview.getByTestId('json-preview-source-highlight-back-to-qa'));
     expect(onBackToQa).toHaveBeenCalledTimes(1);
   });
 
@@ -474,7 +476,7 @@ describe('json preview renderer', () => {
     const secondMatchEnd = text.indexOf('}', secondMatchStart) + 1;
     const secondProfileSlice = text.slice(secondMatchStart, secondMatchEnd);
 
-    render(
+    const view = render(
       <JsonPreview
         value={value}
         sourceHighlight={{
@@ -486,10 +488,11 @@ describe('json preview renderer', () => {
       />,
     );
 
-    const content = screen.getByTestId('json-preview-content');
+    const preview = within(view.container);
+    const content = preview.getByTestId('json-preview-content');
     const beforeHighlight = content.firstChild?.textContent ?? '';
     const afterHighlight = content.lastChild?.textContent ?? '';
-    const highlight = screen.getByTestId('json-preview-source-highlight');
+    const highlight = preview.getByTestId('json-preview-source-highlight');
 
     expect(beforeHighlight).toContain('},\n    {\n      ');
     expect(highlight).toHaveTextContent('"profile": {');
@@ -504,7 +507,7 @@ describe('json preview renderer', () => {
       ],
     };
 
-    render(
+    const view = render(
       <JsonPreview
         value={value}
         sourceHighlight={{
@@ -514,9 +517,10 @@ describe('json preview renderer', () => {
       />,
     );
 
-    const content = screen.getByTestId('json-preview-content');
+    const preview = within(view.container);
+    const content = preview.getByTestId('json-preview-content');
     const beforeHighlight = content.firstChild?.textContent ?? '';
-    const highlight = screen.getByTestId('json-preview-source-highlight');
+    const highlight = preview.getByTestId('json-preview-source-highlight');
 
     expect(beforeHighlight).toContain('"id": 2');
     expect(beforeHighlight).toContain('"profile": ');
@@ -525,14 +529,14 @@ describe('json preview renderer', () => {
   });
 
   it('supports jsonPath root targeting for valid null json documents', () => {
-    render(
+    const view = render(
       <JsonPreview
         value="null"
         sourceHighlight={{jsonPath: '$'}}
       />,
     );
 
-    expect(screen.getByTestId('json-preview-source-highlight')).toHaveTextContent('null');
+    expect(within(view.container).getByTestId('json-preview-source-highlight')).toHaveTextContent('null');
   });
 
   it('supports escaped bracket jsonPath for object keys that need quoting', () => {
@@ -545,18 +549,19 @@ describe('json preview renderer', () => {
       },
     };
 
-    render(
+    const view = render(
       <JsonPreview
         value={value}
         sourceHighlight={{jsonPath: '$["profile.name[0] \\\"primary\\\""]'}}
       />,
     );
 
-    const content = screen.getByTestId('json-preview-content');
+    const preview = within(view.container);
+    const content = preview.getByTestId('json-preview-content');
     const beforeHighlight = content.firstChild?.textContent ?? '';
 
     expect(beforeHighlight).toContain('"profile.name[0] \\\"primary\\\"": ');
-    expect(screen.getByTestId('json-preview-source-highlight')).toHaveTextContent('"city": "Beijing"');
+    expect(preview.getByTestId('json-preview-source-highlight')).toHaveTextContent('"city": "Beijing"');
   });
 
   it('rejects drifted but in-bounds node offsets and falls back to jsonPath targeting', () => {
@@ -570,7 +575,7 @@ describe('json preview renderer', () => {
     const firstProfileStart = text.indexOf('"profile": {');
     const firstProfileEnd = text.indexOf('}', firstProfileStart) + 1;
 
-    render(
+    const view = render(
       <JsonPreview
         value={value}
         sourceHighlight={{
@@ -582,9 +587,10 @@ describe('json preview renderer', () => {
       />,
     );
 
-    const content = screen.getByTestId('json-preview-content');
+    const preview = within(view.container);
+    const content = preview.getByTestId('json-preview-content');
     const beforeHighlight = content.firstChild?.textContent ?? '';
-    const highlight = screen.getByTestId('json-preview-source-highlight');
+    const highlight = preview.getByTestId('json-preview-source-highlight');
 
     expect(beforeHighlight).toContain('"id": 2');
     expect(highlight).toHaveTextContent('"name": "Alice"');
@@ -650,15 +656,15 @@ describe('text preview renderer', () => {
   });
 
   it('highlights source snippet inside text preview', () => {
-    render(<TextPreview text="第一段\n关键命中内容\n第三段" sourceHighlight={{content: '关键命中内容'}} />);
+    const view = render(<TextPreview text="第一段\n关键命中内容\n第三段" sourceHighlight={{content: '关键命中内容'}} />);
 
-    expect(screen.getByTestId('preview-highlight-block')).toHaveTextContent('关键命中内容');
+    expect(within(view.container).getByTestId('preview-highlight-block')).toHaveTextContent('关键命中内容');
   });
 
   it('renders text source as block highlight and supports click-through', () => {
     const onOpenDetail = vi.fn();
     const onBackToQa = vi.fn();
-    render(
+    const view = render(
       <TextPreview
         text="第一段\n目标分块正文\n第三段"
         sourceHighlight={{content: '目标分块正文'}}
@@ -667,10 +673,12 @@ describe('text preview renderer', () => {
       />,
     );
 
-    expect(screen.getByTestId('preview-highlight-block')).toHaveTextContent('目标分块正文');
-    fireEvent.click(screen.getByTestId('preview-highlight-block'));
+    const preview = within(view.container);
+
+    expect(preview.getByTestId('preview-highlight-block')).toHaveTextContent('目标分块正文');
+    fireEvent.click(preview.getByTestId('preview-highlight-block'));
     expect(onOpenDetail).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByTestId('text-preview-source-highlight-back-to-qa'));
+    fireEvent.click(preview.getByTestId('text-preview-source-highlight-back-to-qa'));
     expect(onBackToQa).toHaveBeenCalledTimes(1);
   });
 
@@ -679,7 +687,7 @@ describe('text preview renderer', () => {
     const firstMatchStart = text.indexOf('重复片段');
     const secondMatchStart = text.indexOf('重复片段', firstMatchStart + 1);
 
-    render(
+    const view = render(
       <TextPreview
         text={text}
         sourceHighlight={{
@@ -691,7 +699,7 @@ describe('text preview renderer', () => {
       />,
     );
 
-    const content = screen.getByTestId('text-preview-content');
+    const content = within(view.container).getByTestId('text-preview-content');
     const beforeHighlight = content.firstChild?.textContent ?? '';
     const afterHighlight = content.lastChild?.textContent ?? '';
 
@@ -704,7 +712,7 @@ describe('text preview renderer', () => {
     const firstMatchStart = text.indexOf('重复片段');
     const secondMatchStart = text.indexOf('重复片段', firstMatchStart + 1);
 
-    render(
+    const view = render(
       <TextPreview
         text={text}
         sourceHighlight={{
@@ -716,7 +724,7 @@ describe('text preview renderer', () => {
       />,
     );
 
-    const content = screen.getByTestId('text-preview-content');
+    const content = within(view.container).getByTestId('text-preview-content');
     const beforeHighlight = content.firstChild?.textContent ?? '';
 
     expect(beforeHighlight).not.toContain('中间内容');
@@ -727,7 +735,7 @@ describe('text preview renderer', () => {
     const firstMatchStart = text.indexOf('重复片段');
     const secondMatchStart = text.indexOf('重复片段', firstMatchStart + 1);
 
-    render(
+    const view = render(
       <TextPreview
         text={text}
         sourceHighlight={{
@@ -739,7 +747,7 @@ describe('text preview renderer', () => {
       />,
     );
 
-    const content = screen.getByTestId('text-preview-content');
+    const content = within(view.container).getByTestId('text-preview-content');
     const beforeHighlight = content.firstChild?.textContent ?? '';
     const afterHighlight = content.lastChild?.textContent ?? '';
 
