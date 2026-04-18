@@ -312,7 +312,27 @@ export function registerDocumentPreviewRoutes(app: express.Express, db: any) {
   });
 }
 
-function mapSources(topChunks: any[]) {
+function resolveStructuredSourceMetadata(chunk: any, metadata?: any) {
+  return {
+    originStart: chunk?.originStart ?? metadata?.originStart ?? undefined,
+    originEnd: chunk?.originEnd ?? metadata?.originEnd ?? undefined,
+    pageStart: chunk?.pageStart ?? metadata?.pageStart ?? undefined,
+    pageEnd: chunk?.pageEnd ?? metadata?.pageEnd ?? undefined,
+    textOffsetStart: chunk?.textOffsetStart ?? metadata?.textOffsetStart ?? undefined,
+    textOffsetEnd: chunk?.textOffsetEnd ?? metadata?.textOffsetEnd ?? undefined,
+    sheetId: chunk?.sheetId ?? metadata?.sheetId ?? undefined,
+    sheetName: chunk?.sheetName ?? metadata?.sheetName ?? undefined,
+    rowStart: chunk?.rowStart ?? metadata?.rowStart ?? undefined,
+    rowEnd: chunk?.rowEnd ?? metadata?.rowEnd ?? undefined,
+    columnStart: chunk?.columnStart ?? metadata?.columnStart ?? undefined,
+    columnEnd: chunk?.columnEnd ?? metadata?.columnEnd ?? undefined,
+    jsonPath: chunk?.jsonPath ?? metadata?.jsonPath ?? undefined,
+    nodeStartOffset: chunk?.nodeStartOffset ?? metadata?.nodeStartOffset ?? undefined,
+    nodeEndOffset: chunk?.nodeEndOffset ?? metadata?.nodeEndOffset ?? undefined,
+  };
+}
+
+export function mapSources(topChunks: any[]) {
   return topChunks.map((chunk: any) => ({
     docId: typeof chunk?.docId === 'string' ? chunk.docId : undefined,
     chunkId: typeof chunk?.id === 'string' ? chunk.id : undefined,
@@ -323,7 +343,22 @@ function mapSources(topChunks: any[]) {
     content: typeof chunk?.content === 'string'
       ? `${chunk.content.substring(0, 100)}...`
       : '',
+    textQuote: typeof chunk?.textQuote === 'string' ? chunk.textQuote : undefined,
+    ...resolveStructuredSourceMetadata(chunk),
   }));
+}
+
+export function enrichRetrievedChunksWithMetadata(chunks: any[], metadataRecords: any[]) {
+  const metadataByChunkId = new Map(metadataRecords.map((row: any) => [row?.chunkId, row]));
+
+  return chunks.map((chunk: any) => {
+    const metadata = metadataByChunkId.get(chunk?.id);
+    return {
+      ...metadata,
+      ...chunk,
+      ...resolveStructuredSourceMetadata(chunk, metadata),
+    };
+  });
 }
 
 async function retrieveTopChunks(message: string, config: RuntimeConfig) {
