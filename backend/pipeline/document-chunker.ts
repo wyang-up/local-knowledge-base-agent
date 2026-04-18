@@ -89,6 +89,11 @@ function splitBySentences(text: string) {
   return (hits ?? [normalized]).map((item) => item.trim()).filter(Boolean);
 }
 
+function hasPageRange(unit: unknown): unit is { pageStart?: number | null; pageEnd?: number | null } {
+  if (!unit || typeof unit !== 'object') return false;
+  return 'pageStart' in unit || 'pageEnd' in unit;
+}
+
 function tailOverlap(parts: string[], targetToken: number) {
   const selected: string[] = [];
   let count = 0;
@@ -364,6 +369,37 @@ function chunkSectionBySentences(input: {
 }
 
 function chunkPdfDocx(cleaned: CleanedDocument): ChunkDraft[] {
+  const pageUnits = cleaned.units.filter((unit) => hasPageRange(unit));
+  if (pageUnits.length > 0) {
+    return pageUnits.map((unit) => {
+      const sectionType = classifyPageUnit(unit.text);
+      return {
+        sourceUnit: 'body' as const,
+        sourceLabel: unit.sourceLabel,
+        content: unit.text,
+        tokenCount: estimateTokens(unit.text),
+        overlapTokenCount: 0,
+        qualityStatus: 'passed' as const,
+        qualityNote: sectionType === 'toc'
+          ? 'toc_keep_no_rag'
+          : sectionType === 'references'
+            ? 'references_entry_chunk'
+            : sectionType === 'appendix'
+              ? 'appendix_single_chunk'
+              : 'semantic_chunk_pdf_docx',
+        retrievalEligible: sectionType !== 'toc' && sectionType !== 'references',
+        sectionLevel: 1 as const,
+        sectionType,
+        lang: detectPrimaryLanguage(unit.text),
+        title: unit.sourceLabel ?? cleaned.fileName,
+        hierarchy: [unit.sourceLabel ?? cleaned.fileName],
+        nodeType: toNodeType(sectionType),
+        pageStart: unit.pageStart ?? null,
+        pageEnd: unit.pageEnd ?? null,
+      };
+    });
+  }
+
   const documentLang = detectPrimaryLanguage(cleaned.text);
   const totalTokens = estimateTokens(cleaned.text);
   if (totalTokens <= SMALL_DOC_TOKEN_THRESHOLD) {
@@ -459,6 +495,14 @@ function chunkPdfDocx(cleaned: CleanedDocument): ChunkDraft[] {
   }
 
   return chunks;
+}
+
+function classifyPageUnit(text: string): 'toc' | 'references' | 'appendix' | 'body' {
+  const normalized = text.trim();
+  if (/^\s*(目录|contents)(?:\s|$)/im.test(normalized)) return 'toc';
+  if (/^\s*(参考文献|references)(?:\s|$)/im.test(normalized)) return 'references';
+  if (/^\s*(附录|appendix)(?:\s|$)/im.test(normalized)) return 'appendix';
+  return 'body';
 }
 
 function chunkTxt(cleaned: CleanedDocument): ChunkDraft[] {

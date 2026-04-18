@@ -42,6 +42,16 @@ function normalizeBodyText(input: string) {
     .trim();
 }
 
+function cleanTextValue(input: string) {
+  let text = input;
+  text = removePaginationFooters(text);
+  text = removeMojibake(text);
+  text = collapseBlankLines(text);
+  text = removeInvalidSymbols(text);
+  text = removeReferenceTail(text);
+  return normalizeBodyText(text);
+}
+
 export function cleanDocumentText(parsed: ParsedDocument): CleanedDocument {
   let text = parsed.text;
   const cleaningApplied: string[] = [];
@@ -89,7 +99,7 @@ export function cleanDocumentText(parsed: ParsedDocument): CleanedDocument {
   const units = parsed.units
     .map((unit) => ({
       ...unit,
-      text: normalizeBodyText(removeInvalidSymbols(removeMojibake(collapseBlankLines(unit.text)))),
+      text: cleanTextValue(unit.text),
     }))
     .filter((unit) => unit.text.trim().length > 0);
 

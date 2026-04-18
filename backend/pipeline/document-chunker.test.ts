@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest';
+import { cleanDocumentText } from './document-cleaner.ts';
 import { chunkDocument, qualityCheckChunks } from './document-chunker.ts';
 import { splitSentencesForTest } from './document-chunker.test-helper.ts';
 import { protectEnglishBoundaries, restoreProtectedTokens } from './document-sentence-splitter.ts';
@@ -145,6 +146,56 @@ describe('document-chunker', () => {
     expect(referenceChunks).toHaveLength(3);
     expect(referenceChunks.every((chunk) => chunk.sectionLevel === 1)).toBe(true);
     expect(referenceChunks.every((chunk) => chunk.qualityNote === 'references_entry_chunk')).toBe(true);
+  });
+
+  it('does not keep pagination footer noise when chunking from pdf page units', () => {
+    const cleaned = cleanDocumentText({
+      fileType: 'pdf',
+      fileName: 'sample.pdf',
+      text: '正文\n页码 12',
+      units: [
+        { sourceUnit: 'body', sourceLabel: '第1页', text: '正文\n页码 12', pageStart: 1, pageEnd: 1 },
+      ],
+    } as any);
+
+    const chunks = chunkDocument(cleaned);
+
+    expect(chunks[0]?.content).not.toContain('页码 12');
+  });
+
+  it('keeps toc pages out of regular retrieval when page units are available', () => {
+    const chunks = chunkDocument(baseCleaned({
+      fileType: 'pdf',
+      fileName: 'toc.pdf',
+      text: '目录\n第一章 ...... 1\n第二章 ...... 5\n正文开始',
+      units: [
+        { sourceUnit: 'body', sourceLabel: '第1页', text: '目录\n第一章 ...... 1\n第二章 ...... 5', pageStart: 1, pageEnd: 1 },
+        { sourceUnit: 'body', sourceLabel: '第2页', text: '第一章\n正文开始', pageStart: 2, pageEnd: 2 },
+      ] as any,
+    }));
+
+    const tocChunk = chunks.find((chunk) => chunk.pageStart === 1);
+
+    expect(tocChunk?.sectionType).toBe('toc');
+    expect(tocChunk?.retrievalEligible).toBe(false);
+  });
+
+  it('keeps reference pages out of body retrieval when page units are available', () => {
+    const chunks = chunkDocument(baseCleaned({
+      fileType: 'pdf',
+      fileName: 'refs.pdf',
+      text: '正文\nReferences\n[1] Alpha',
+      units: [
+        { sourceUnit: 'body', sourceLabel: '第1页', text: '第一章\n正文', pageStart: 1, pageEnd: 1 },
+        { sourceUnit: 'body', sourceLabel: '第2页', text: 'References\n[1] Alpha', pageStart: 2, pageEnd: 2 },
+      ] as any,
+    }));
+
+    const referenceChunk = chunks.find((chunk) => chunk.pageStart === 2);
+
+    expect(referenceChunk?.sectionType).toBe('references');
+    expect(referenceChunk?.nodeType).toBe('ref');
+    expect(referenceChunk?.retrievalEligible).toBe(false);
   });
 });
 
