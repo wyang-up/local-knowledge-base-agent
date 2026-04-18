@@ -25,4 +25,16 @@ describe('buildPdfHighlightTarget', () => {
       notice: '当前仅支持定位到 PDF 页码，暂不展示不可信的精确高亮。',
     });
   });
+
+  it('uses pageEnd when pageStart is missing', () => {
+    expect(
+      buildPdfHighlightTarget({
+        pageEnd: 4,
+        textQuote: '这里是目标朔源内容片段',
+      }),
+    ).toEqual({
+      page: 4,
+      notice: '当前仅支持定位到 PDF 页码，暂不展示不可信的精确高亮。',
+    });
+  });
 });

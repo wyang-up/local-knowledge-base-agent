@@ -10,7 +10,9 @@ export type PdfHighlightTarget = {
 export function buildPdfHighlightTarget(sourceHighlight: SourceHighlightTarget | null | undefined): PdfHighlightTarget {
   const page = typeof sourceHighlight?.pageStart === 'number' && sourceHighlight.pageStart > 0
     ? sourceHighlight.pageStart
-    : 1;
+    : typeof sourceHighlight?.pageEnd === 'number' && sourceHighlight.pageEnd > 0
+      ? sourceHighlight.pageEnd
+      : 1;
 
   return {
     page,
