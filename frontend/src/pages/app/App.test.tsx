@@ -1298,7 +1298,7 @@ describe('App', () => {
     });
   });
 
-  it('bootstraps auth tokens before protected settings request', async () => {
+  it('uses available auth tokens without unnecessary bootstrap for protected settings request', async () => {
     const user = userEvent.setup();
     const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
     const bootstrapCalls: RequestInit[] = [];
@@ -1356,7 +1356,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '导出' }));
 
     expect(await screen.findByText('导出成功')).toBeInTheDocument();
-    expect(bootstrapCalls.length).toBeGreaterThan(0);
+    expect(bootstrapCalls.length).toBe(0);
     expect(exportCalls.length).toBeGreaterThan(0);
   });
 
@@ -1776,6 +1776,109 @@ describe('App', () => {
       expect(hasRequiredSettingsHeaders(modelsCall?.[1] as RequestInit)).toBe(true);
       expect(hasRequiredSettingsHeaders(configAllCall?.[1] as RequestInit)).toBe(true);
     });
+  });
+
+  it('bootstraps auth tokens before initial protected settings loads in app shell', async () => {
+    const user = userEvent.setup();
+    const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+    const bootstrapCalls: RequestInit[] = [];
+    const configAllCalls: RequestInit[] = [];
+    const providerModelCalls: RequestInit[] = [];
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+
+      if (url.includes('/api/documents/doc-1')) {
+        return new Response(JSON.stringify(detailResponse), { status: 200 });
+      }
+      if (url.includes('/api/documents')) {
+        return new Response(JSON.stringify(documentsResponse), { status: 200 });
+      }
+      if (url.includes('/api/config/model')) {
+        return new Response(JSON.stringify({
+          baseUrl: 'https://api.siliconflow.cn/v1',
+          embeddingModel: 'BAAI/bge-m3',
+          llmModel: 'deepseek-ai/DeepSeek-V3',
+          storagePath: './data/lance',
+          documentStoragePath: './data/uploads',
+          readOnly: true,
+          hasApiKey: false,
+        }), { status: 200 });
+      }
+      if (url.includes('/api/settings/auth/bootstrap') && init?.method === 'GET') {
+        bootstrapCalls.push(init as RequestInit);
+        return new Response(JSON.stringify({
+          sessionToken: BOOTSTRAP_SESSION_TOKEN,
+          csrfToken: BOOTSTRAP_CSRF_TOKEN,
+        }), { status: 200 });
+      }
+      if (url.includes('/api/config/all')) {
+        configAllCalls.push(init as RequestInit);
+        const headers = new Headers(init?.headers);
+        const ok = headers.get(SETTINGS_SESSION_HEADER) === BOOTSTRAP_SESSION_TOKEN
+          && headers.get(SETTINGS_CSRF_HEADER) === BOOTSTRAP_CSRF_TOKEN;
+        if (!ok) {
+          return new Response(JSON.stringify({ code: 'AUTH_UNAUTHORIZED' }), { status: 401 });
+        }
+        return new Response(JSON.stringify({
+          ui: { language: 'zh', theme: 'light' },
+          providers: [{
+            providerId: 'siliconflow',
+            version: 1,
+            baseUrl: 'https://api.siliconflow.cn/v1',
+            llmModel: 'deepseek-ai/DeepSeek-V3',
+            embeddingModel: 'BAAI/bge-m3',
+            hasKey: false,
+            maskedKey: '',
+            updatedAt: '2026-04-06T00:00:00.000Z',
+            lastModelSyncAt: null,
+          }],
+          storage: {
+            version: 1,
+            storagePath: './data/lance',
+            documentStoragePath: './data/uploads',
+            platform: 'linux',
+            cacheSizeBytes: 0,
+            freeSpaceBytes: 0,
+            updatedAt: '2026-04-06T00:00:00.000Z',
+          },
+        }), { status: 200 });
+      }
+      if (url.includes('/api/config/provider/siliconflow/models')) {
+        providerModelCalls.push(init as RequestInit);
+        const headers = new Headers(init?.headers);
+        const ok = headers.get(SETTINGS_SESSION_HEADER) === BOOTSTRAP_SESSION_TOKEN
+          && headers.get(SETTINGS_CSRF_HEADER) === BOOTSTRAP_CSRF_TOKEN;
+        if (!ok) {
+          return new Response(JSON.stringify({ code: 'AUTH_UNAUTHORIZED' }), { status: 401 });
+        }
+        return new Response(JSON.stringify({ models: [] }), { status: 200 });
+      }
+      if (url.includes('/api/settings/preview-flags')) {
+        return new Response(JSON.stringify({
+          enableNewPreviewModal: true,
+          enableNewPreviewByType: { pdf: true },
+        }), { status: 200 });
+      }
+      if (url.includes('/api/chat') || url.includes('/api/mcp')) {
+        return new Response(JSON.stringify({ content: 'ok', sources: [] }), { status: 200 });
+      }
+
+      throw new Error(`Unhandled fetch mock in initial protected settings load test: ${init?.method || 'GET'} ${url}`);
+    });
+
+    render(<App />);
+    await user.click(await screen.findByText('设置'));
+
+    await waitFor(() => {
+      expect(bootstrapCalls.length).toBeGreaterThan(0);
+      expect(configAllCalls.length).toBeGreaterThan(1);
+      expect(providerModelCalls.length).toBeGreaterThan(1);
+    });
+
+    expect(hasRequiredSettingsHeaders(configAllCalls.at(-1))).toBe(true);
+    expect(hasRequiredSettingsHeaders(providerModelCalls.at(-1))).toBe(true);
+    expect(await screen.findByText(/缓存占用: 0 B/)).toBeInTheDocument();
   });
 
   it('tests provider connectivity with current draft values', async () => {

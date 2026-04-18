@@ -14,6 +14,7 @@ const SETTINGS_SESSION_STORAGE_KEY = 'kb.settings.sessionToken';
 const SETTINGS_CSRF_STORAGE_KEY = 'kb.settings.csrfToken';
 const SETTINGS_AUTH_BOOTSTRAP_ENDPOINT = '/api/settings/auth/bootstrap';
 const runtimeGeneratedTokens: Partial<Record<'session' | 'csrf', string>> = {};
+let settingsBootstrapPromise: Promise<boolean> | null = null;
 
 export type DialogRequest = {
   id: string;
@@ -197,6 +198,15 @@ function clearSettingsSecurityTokens() {
   runtimeGeneratedTokens.csrf = undefined;
   clearSessionStorageToken(SETTINGS_SESSION_STORAGE_KEY);
   clearSessionStorageToken(SETTINGS_CSRF_STORAGE_KEY);
+  settingsBootstrapPromise = null;
+}
+
+function hasResolvedSettingsToken(kind: 'session' | 'csrf') {
+  return Boolean(
+    readConfiguredToken(kind)
+      || readSessionStorageToken(kind === 'session' ? SETTINGS_SESSION_STORAGE_KEY : SETTINGS_CSRF_STORAGE_KEY)
+      || runtimeGeneratedTokens[kind],
+  );
 }
 
 function downloadJsonFile(payload: unknown, fileName: string) {
@@ -229,6 +239,24 @@ async function bootstrapSettingsTokens(apiUrl: (endpoint: string) => string) {
   return true;
 }
 
+async function ensureSettingsTokens(apiUrl: (endpoint: string) => string) {
+  if (hasResolvedSettingsToken('session') && hasResolvedSettingsToken('csrf')) {
+    return true;
+  }
+
+  if (!settingsBootstrapPromise) {
+    settingsBootstrapPromise = bootstrapSettingsTokens(apiUrl).finally(() => {
+      settingsBootstrapPromise = null;
+    });
+  }
+
+  try {
+    return await settingsBootstrapPromise;
+  } catch {
+    return false;
+  }
+}
+
 function isAuthFailureStatus(status: number) {
   return status === 401 || status === 403;
 }
@@ -240,11 +268,13 @@ export function getSettingsSecurityHeaders(extraHeaders?: HeadersInit) {
   return headers;
 }
 
-async function settingsFetch(
+export async function settingsFetch(
   apiUrl: (endpoint: string) => string,
   endpoint: string,
   init: RequestInit,
 ) {
+  await ensureSettingsTokens(apiUrl);
+
   const send = () => fetch(apiUrl(endpoint), {
     ...init,
     headers: getSettingsSecurityHeaders(init.headers),

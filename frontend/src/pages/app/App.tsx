@@ -6,7 +6,7 @@ import { Document, Message, MessageSource, Settings as AppSettings, Chunk, Conve
 import { useSettingsState } from '../../features/settings/useSettingsState';
 import type { ProviderModelItem } from '../../features/settings/components/ModelConfigCard';
 import type { SettingsDraft } from '../../features/settings/types';
-import { getSettingsSecurityHeaders, useSettingsPageController } from '../../features/settings/useSettingsPageController';
+import { settingsFetch, useSettingsPageController } from '../../features/settings/useSettingsPageController';
 import { AppShell } from './components/AppShell';
 import { DocumentListPanel } from './components/DocumentListPanel';
 import { DocumentDetailPanel } from './components/DocumentDetailPanel';
@@ -352,16 +352,15 @@ export default function App() {
   };
 
   const secureGet = async (endpoint: string) => {
-    return fetch(apiUrl(endpoint), {
+    return settingsFetch(apiUrl, endpoint, {
       method: 'GET',
-      headers: getSettingsSecurityHeaders(),
     });
   };
 
   const securePost = async (endpoint: string, body: Record<string, unknown> = {}) => {
-    return fetch(apiUrl(endpoint), {
+    return settingsFetch(apiUrl, endpoint, {
       method: 'POST',
-      headers: getSettingsSecurityHeaders({ 'Content-Type': 'application/json' }),
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
   };
