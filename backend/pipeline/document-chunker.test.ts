@@ -180,22 +180,45 @@ describe('document-chunker', () => {
     expect(tocChunk?.retrievalEligible).toBe(false);
   });
 
-  it('keeps reference pages out of body retrieval when page units are available', () => {
-    const chunks = chunkDocument(baseCleaned({
+  it('keeps reference pages out of body retrieval when page units are available after cleaning', () => {
+    const cleaned = cleanDocumentText({
       fileType: 'pdf',
       fileName: 'refs.pdf',
       text: '正文\nReferences\n[1] Alpha',
       units: [
-        { sourceUnit: 'body', sourceLabel: '第1页', text: '第一章\n正文', pageStart: 1, pageEnd: 1 },
-        { sourceUnit: 'body', sourceLabel: '第2页', text: 'References\n[1] Alpha', pageStart: 2, pageEnd: 2 },
+        { sourceUnit: 'body', sourceLabel: '第1页', text: '第一章\n正文\n页码 1', pageStart: 1, pageEnd: 1 },
+        { sourceUnit: 'body', sourceLabel: '第2页', text: 'References\n[1] Alpha\n页码 2', pageStart: 2, pageEnd: 2 },
       ] as any,
-    }));
+    } as any);
+
+    const chunks = chunkDocument(cleaned);
 
     const referenceChunk = chunks.find((chunk) => chunk.pageStart === 2);
 
     expect(referenceChunk?.sectionType).toBe('references');
     expect(referenceChunk?.nodeType).toBe('ref');
     expect(referenceChunk?.retrievalEligible).toBe(false);
+  });
+
+  it('infers body-page semantics from page content instead of page labels', () => {
+    const chunks = chunkDocument(baseCleaned({
+      fileType: 'pdf',
+      fileName: 'body.pdf',
+      text: '第一章\n正文开始',
+      units: [
+        { sourceUnit: 'body', sourceLabel: '第2页', text: '第一章\n正文开始', pageStart: 2, pageEnd: 2 },
+      ] as any,
+    }));
+
+    expect(chunks[0]).toMatchObject({
+      sectionType: 'chapter',
+      nodeType: 'chapter',
+      title: '第一章',
+      hierarchy: ['第一章'],
+      sourceLabel: '第一章',
+      pageStart: 2,
+      pageEnd: 2,
+    });
   });
 });
 

@@ -94,6 +94,17 @@ function hasPageRange(unit: unknown): unit is { pageStart?: number | null; pageE
   return 'pageStart' in unit || 'pageEnd' in unit;
 }
 
+function inferPageSection(text: string) {
+  const sections = toSections({ text, units: [] } as CleanedDocument);
+  return sections[0] ?? {
+    heading: '正文',
+    level: 1 as const,
+    type: 'body' as const,
+    hierarchy: ['正文'],
+    lines: text ? [text] : [],
+  };
+}
+
 function tailOverlap(parts: string[], targetToken: number) {
   const selected: string[] = [];
   let count = 0;
@@ -373,9 +384,12 @@ function chunkPdfDocx(cleaned: CleanedDocument): ChunkDraft[] {
   if (pageUnits.length > 0) {
     return pageUnits.map((unit) => {
       const sectionType = classifyPageUnit(unit.text);
+      const inferredSection = sectionType === 'body' ? inferPageSection(unit.text) : null;
+      const title = inferredSection?.heading ?? unit.sourceLabel ?? cleaned.fileName;
+      const hierarchy = inferredSection?.hierarchy ?? [unit.sourceLabel ?? cleaned.fileName];
       return {
         sourceUnit: 'body' as const,
-        sourceLabel: unit.sourceLabel,
+        sourceLabel: inferredSection?.heading ?? unit.sourceLabel,
         content: unit.text,
         tokenCount: estimateTokens(unit.text),
         overlapTokenCount: 0,
@@ -388,12 +402,12 @@ function chunkPdfDocx(cleaned: CleanedDocument): ChunkDraft[] {
               ? 'appendix_single_chunk'
               : 'semantic_chunk_pdf_docx',
         retrievalEligible: sectionType !== 'toc' && sectionType !== 'references',
-        sectionLevel: 1 as const,
-        sectionType,
+        sectionLevel: inferredSection?.level ?? 1,
+        sectionType: inferredSection?.type ?? sectionType,
         lang: detectPrimaryLanguage(unit.text),
-        title: unit.sourceLabel ?? cleaned.fileName,
-        hierarchy: [unit.sourceLabel ?? cleaned.fileName],
-        nodeType: toNodeType(sectionType),
+        title,
+        hierarchy,
+        nodeType: toNodeType(inferredSection?.type ?? sectionType),
         pageStart: unit.pageStart ?? null,
         pageEnd: unit.pageEnd ?? null,
       };

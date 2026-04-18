@@ -42,13 +42,15 @@ function normalizeBodyText(input: string) {
     .trim();
 }
 
-function cleanTextValue(input: string) {
+function cleanTextValue(input: string, options?: { preserveReferenceSections?: boolean }) {
   let text = input;
   text = removePaginationFooters(text);
   text = removeMojibake(text);
   text = collapseBlankLines(text);
   text = removeInvalidSymbols(text);
-  text = removeReferenceTail(text);
+  if (!options?.preserveReferenceSections) {
+    text = removeReferenceTail(text);
+  }
   return normalizeBodyText(text);
 }
 
@@ -99,7 +101,7 @@ export function cleanDocumentText(parsed: ParsedDocument): CleanedDocument {
   const units = parsed.units
     .map((unit) => ({
       ...unit,
-      text: cleanTextValue(unit.text),
+      text: cleanTextValue(unit.text, { preserveReferenceSections: true }),
     }))
     .filter((unit) => unit.text.trim().length > 0);
 
